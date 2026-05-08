@@ -250,11 +250,28 @@ function initDb() {
       source TEXT NOT NULL,
       payload_json TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS learning_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at_ms INTEGER NOT NULL,
+      window_ms INTEGER NOT NULL,
+      summary_json TEXT NOT NULL,
+      lessons_json TEXT NOT NULL,
+      raw_json TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS learning_lessons (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id INTEGER NOT NULL,
+      created_at_ms INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      lesson TEXT NOT NULL,
+      evidence_json TEXT NOT NULL
+    );
     CREATE INDEX IF NOT EXISTS idx_candidates_mint ON candidates(mint);
     CREATE INDEX IF NOT EXISTS idx_positions_status ON dry_run_positions(status);
     CREATE INDEX IF NOT EXISTS idx_trade_intents_status ON trade_intents(status);
     CREATE INDEX IF NOT EXISTS idx_decision_logs_mint ON decision_logs(selected_mint);
     CREATE INDEX IF NOT EXISTS idx_signal_events_mint ON signal_events(mint);
+    CREATE INDEX IF NOT EXISTS idx_learning_lessons_status ON learning_lessons(status, created_at_ms);
   `);
   ensureColumn('candidates', 'signal_key', 'TEXT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_candidates_signal_key ON candidates(signal_key) WHERE signal_key IS NOT NULL');
@@ -1225,6 +1242,16 @@ function normalizeDecision(parsed, fallbackReason = '') {
   };
 }
 
+function activeLessonsForPrompt(limit = 6) {
+  return db.prepare(`
+    SELECT lesson
+    FROM learning_lessons
+    WHERE status = 'active'
+    ORDER BY id DESC
+    LIMIT ?
+  `).all(limit).map(row => row.lesson);
+}
+
 function compactCandidateForLlm(row) {
   const c = row.candidate;
   const athWindow = c.chart?.windows?.find(window => window.label === 'ath_context_24h_5m' && window.available)
@@ -1290,6 +1317,7 @@ async function decideCandidateBatch(rows, triggerCandidateId) {
   ].join(' ');
   const user = {
     task: 'Pick the best dry-run buy candidate from this recent batch, or choose none.',
+    recent_lessons: activeLessonsForPrompt(),
     output_schema: {
       verdict: 'BUY|WATCH|PASS',
       selected_candidate_id: 'integer candidate_id when verdict is BUY, otherwise null',
@@ -2909,6 +2937,241 @@ async function sendPnl(chatId) {
   await bot.sendMessage(chatId, `📊 <b>PnL</b>\n\n${chunks.join('\n\n')}`, { parse_mode: 'HTML' });
 }
 
+function parseWindowMs(value = '12h') {
+  const raw = String(value || '12h').trim().toLowerCase();
+  const match = raw.match(/^(\d+(?:\.\d+)?)(m|h|d)?$/);
+  if (!match) return 12 * 60 * 60 * 1000;
+  const amount = Number(match[1]);
+  const unit = match[2] || 'h';
+  const multipliers = { m: 60_000, h: 60 * 60_000, d: 24 * 60 * 60_000 };
+  return Math.max(5 * 60_000, Math.min(30 * 24 * 60 * 60_000, amount * multipliers[unit]));
+}
+
+function formatWindow(ms) {
+  if (ms % (24 * 60 * 60_000) === 0) return `${ms / (24 * 60 * 60_000)}d`;
+  if (ms % (60 * 60_000) === 0) return `${ms / (60 * 60_000)}h`;
+  return `${Math.round(ms / 60_000)}m`;
+}
+
+function positionSnapshotCandidate(position) {
+  return safeJson(position.snapshot_json, {})?.candidate || {};
+}
+
+function summarizeLearningWindow(windowMs) {
+  const cutoff = now() - windowMs;
+  const positions = db.prepare(`
+    SELECT *
+    FROM dry_run_positions
+    WHERE opened_at_ms >= ?
+      AND COALESCE(execution_mode, 'dry_run') = 'dry_run'
+    ORDER BY opened_at_ms ASC
+  `).all(cutoff);
+  const closed = positions.filter(position => position.status === 'closed');
+  const winners = closed.filter(position => Number(position.pnl_percent || 0) > 0);
+  const losers = closed.filter(position => Number(position.pnl_percent || 0) < 0);
+  const totalPnlPercent = closed.reduce((sum, position) => sum + Number(position.pnl_percent || 0), 0);
+  const totalPnlSol = closed.reduce((sum, position) => sum + Number(position.pnl_sol || 0), 0);
+  const byRoute = new Map();
+  for (const position of closed) {
+    const candidate = positionSnapshotCandidate(position);
+    const route = candidate.signals?.route || candidate.signals?.label || 'unknown';
+    const row = byRoute.get(route) || { route, count: 0, wins: 0, losses: 0, pnlPercent: 0, pnlSol: 0 };
+    row.count += 1;
+    row.wins += Number(position.pnl_percent || 0) > 0 ? 1 : 0;
+    row.losses += Number(position.pnl_percent || 0) < 0 ? 1 : 0;
+    row.pnlPercent += Number(position.pnl_percent || 0);
+    row.pnlSol += Number(position.pnl_sol || 0);
+    byRoute.set(route, row);
+  }
+  const batches = db.prepare(`
+    SELECT verdict, COUNT(*) AS count, AVG(confidence) AS avg_confidence
+    FROM llm_batches
+    WHERE created_at_ms >= ?
+    GROUP BY verdict
+  `).all(cutoff);
+  const actions = db.prepare(`
+    SELECT action, COUNT(*) AS count
+    FROM decision_logs
+    WHERE at_ms >= ?
+    GROUP BY action
+    ORDER BY count DESC
+  `).all(cutoff);
+  const best = [...closed].sort((a, b) => Number(b.pnl_percent || 0) - Number(a.pnl_percent || 0)).slice(0, 5).map(position => ({
+    mint: position.mint,
+    symbol: position.symbol,
+    pnlPercent: Number(position.pnl_percent || 0),
+    exitReason: position.exit_reason,
+    entryMcap: position.entry_mcap,
+    exitMcap: position.exit_mcap,
+    route: positionSnapshotCandidate(position).signals?.route || 'unknown',
+  }));
+  const worst = [...closed].sort((a, b) => Number(a.pnl_percent || 0) - Number(b.pnl_percent || 0)).slice(0, 5).map(position => ({
+    mint: position.mint,
+    symbol: position.symbol,
+    pnlPercent: Number(position.pnl_percent || 0),
+    exitReason: position.exit_reason,
+    entryMcap: position.entry_mcap,
+    exitMcap: position.exit_mcap,
+    route: positionSnapshotCandidate(position).signals?.route || 'unknown',
+  }));
+  return {
+    windowMs,
+    fromMs: cutoff,
+    toMs: now(),
+    positions: {
+      opened: positions.length,
+      closed: closed.length,
+      open: positions.length - closed.length,
+      wins: winners.length,
+      losses: losers.length,
+      winRate: closed.length ? winners.length / closed.length * 100 : null,
+      totalPnlPercent,
+      avgPnlPercent: closed.length ? totalPnlPercent / closed.length : null,
+      totalPnlSol,
+      byRoute: [...byRoute.values()].map(row => ({
+        ...row,
+        winRate: row.count ? row.wins / row.count * 100 : null,
+        avgPnlPercent: row.count ? row.pnlPercent / row.count : null,
+      })).sort((a, b) => b.pnlPercent - a.pnlPercent),
+      best,
+      worst,
+    },
+    llm: { batches, actions },
+  };
+}
+
+function fallbackLessons(summary) {
+  const lessons = [];
+  const bestRoute = summary.positions.byRoute?.[0];
+  const worstRoute = [...(summary.positions.byRoute || [])].sort((a, b) => a.pnlPercent - b.pnlPercent)[0];
+  if (bestRoute && bestRoute.count >= 2 && bestRoute.pnlPercent > 0) {
+    lessons.push({
+      lesson: `Prefer ${bestRoute.route} when other filters are clean; it led the window with ${fmtPct(bestRoute.avgPnlPercent)} avg PnL across ${bestRoute.count} closed dry-runs.`,
+      evidence: bestRoute,
+    });
+  }
+  if (worstRoute && worstRoute.count >= 2 && worstRoute.pnlPercent < 0) {
+    lessons.push({
+      lesson: `Be stricter on ${worstRoute.route}; it underperformed with ${fmtPct(worstRoute.avgPnlPercent)} avg PnL across ${worstRoute.count} closed dry-runs.`,
+      evidence: worstRoute,
+    });
+  }
+  const slCount = summary.positions.worst?.filter(row => row.exitReason === 'SL').length || 0;
+  if (slCount >= 2) {
+    lessons.push({
+      lesson: `Recent worst exits clustered around SL; require stronger fresh pre-entry mcap/liquidity confirmation before accepting late entries.`,
+      evidence: { slWorstCount: slCount, worst: summary.positions.worst },
+    });
+  }
+  if (!lessons.length) {
+    lessons.push({
+      lesson: 'Not enough closed dry-run evidence yet; keep collecting decisions before changing filters aggressively.',
+      evidence: { closed: summary.positions.closed },
+    });
+  }
+  return lessons.slice(0, 6);
+}
+
+async function generateLessons(summary) {
+  const fallback = fallbackLessons(summary);
+  if (!ENABLE_LLM || !LLM_API_KEY) return { lessons: fallback, raw: { fallback: true } };
+  try {
+    const res = await axios.post(`${LLM_BASE_URL.replace(/\/$/, '')}/chat/completions`, {
+      model: LLM_MODEL,
+      temperature: 0.1,
+      messages: [
+        {
+          role: 'system',
+          content: [
+            'You are Charon learning from dry-run trading evidence.',
+            'Return strict JSON only.',
+            'Do not invent trades or outcomes.',
+            'Create compact operational lessons that can improve the next screening prompt.',
+          ].join(' '),
+        },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            task: 'Analyze this dry-run window and produce up to 6 lessons for future candidate screening.',
+            output_schema: {
+              lessons: [{ lesson: 'short actionable rule', evidence: 'specific supporting data' }],
+            },
+            summary,
+          }),
+        },
+      ],
+    }, {
+      timeout: LLM_TIMEOUT_MS,
+      headers: { authorization: `Bearer ${LLM_API_KEY}`, 'content-type': 'application/json' },
+    });
+    const parsed = strictJsonFromText(res.data?.choices?.[0]?.message?.content || '');
+    const lessons = Array.isArray(parsed.lessons)
+      ? parsed.lessons.map(item => ({
+          lesson: String(item.lesson || '').slice(0, 500),
+          evidence: item.evidence ?? {},
+        })).filter(item => item.lesson)
+      : [];
+    return { lessons: lessons.length ? lessons.slice(0, 6) : fallback, raw: parsed };
+  } catch (err) {
+    console.log(`[learn] LLM failed: ${err.message}`);
+    return { lessons: fallback, raw: { error: err.message, fallback: true } };
+  }
+}
+
+function storeLearningRun(windowMs, summary, lessons, raw) {
+  const result = db.prepare(`
+    INSERT INTO learning_runs (created_at_ms, window_ms, summary_json, lessons_json, raw_json)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(now(), windowMs, json(summary), json(lessons), json(raw));
+  const runId = Number(result.lastInsertRowid);
+  const insert = db.prepare(`
+    INSERT INTO learning_lessons (run_id, created_at_ms, status, lesson, evidence_json)
+    VALUES (?, ?, 'active', ?, ?)
+  `);
+  for (const item of lessons) insert.run(runId, now(), item.lesson, json(item.evidence || {}));
+  return runId;
+}
+
+function learningReportText(runId, summary, lessons) {
+  return [
+    '🧠 <b>Charon Learning</b>',
+    '',
+    `Run: <b>#${runId}</b> · Window: <b>${formatWindow(summary.windowMs)}</b>`,
+    `Closed: ${summary.positions.closed}/${summary.positions.opened} · Win rate: ${fmtPct(summary.positions.winRate)}`,
+    `Avg PnL: ${fmtPct(summary.positions.avgPnlPercent)} · Total: ${fmtSol(summary.positions.totalPnlSol)} SOL`,
+    summary.positions.byRoute?.length ? `Best route: <b>${escapeHtml(summary.positions.byRoute[0].route)}</b> avg ${fmtPct(summary.positions.byRoute[0].avgPnlPercent)} (${summary.positions.byRoute[0].count})` : null,
+    '',
+    '<b>Lessons</b>',
+    ...lessons.map((item, index) => `${index + 1}. ${escapeHtml(item.lesson)}`),
+  ].filter(Boolean).join('\n');
+}
+
+async function runLearning(chatId, windowArg = '12h') {
+  const windowMs = parseWindowMs(windowArg);
+  await bot.sendMessage(chatId, `Learning from the last ${formatWindow(windowMs)}...`);
+  const summary = summarizeLearningWindow(windowMs);
+  const { lessons, raw } = await generateLessons(summary);
+  const runId = storeLearningRun(windowMs, summary, lessons, raw);
+  return bot.sendMessage(chatId, learningReportText(runId, summary, lessons), {
+    parse_mode: 'HTML',
+    disable_web_page_preview: true,
+  });
+}
+
+async function sendLessons(chatId) {
+  const rows = db.prepare(`
+    SELECT id, created_at_ms, lesson
+    FROM learning_lessons
+    WHERE status = 'active'
+    ORDER BY id DESC
+    LIMIT 10
+  `).all();
+  const text = rows.length
+    ? rows.map((row, index) => `${index + 1}. ${escapeHtml(row.lesson)}`).join('\n')
+    : 'No active lessons yet. Run /learn 12h after some dry-run exits.';
+  return bot.sendMessage(chatId, `🧠 <b>Active Lessons</b>\n\n${text}`, { parse_mode: 'HTML' });
+}
+
 function parseSetFilter(text) {
   const parts = text.trim().split(/\s+/);
   return { key: parts[1], value: parts[2] };
@@ -2923,6 +3186,11 @@ async function handleMessage(msg) {
   if (text.startsWith('/positions')) return sendPositions(chatId);
   if (text.startsWith('/filters')) return bot.sendMessage(chatId, filtersText(), { parse_mode: 'HTML' });
   if (text.startsWith('/pnl')) return sendPnl(chatId);
+  if (text.startsWith('/learn')) {
+    const windowArg = text.split(/\s+/)[1] || '12h';
+    return runLearning(chatId, windowArg);
+  }
+  if (text.startsWith('/lessons')) return sendLessons(chatId);
   if (text.startsWith('/candidate')) {
     const mint = text.split(/\s+/)[1];
     if (!mint) return bot.sendMessage(chatId, 'Usage: /candidate <mint>');
@@ -2992,6 +3260,8 @@ function setupTelegram() {
     { command: 'candidate', description: 'Show candidate by mint' },
     { command: 'filters', description: 'Show filters' },
     { command: 'pnl', description: 'Show saved-wallet PnL' },
+    { command: 'learn', description: 'Run manual learning report' },
+    { command: 'lessons', description: 'Show active screening lessons' },
     { command: 'setfilter', description: 'Set a filter value' },
     { command: 'walletadd', description: 'Save wallet for exposure/PnL' },
     { command: 'walletremove', description: 'Remove saved wallet' },

@@ -108,6 +108,8 @@ Fallback commands:
 - `/candidate <mint>`
 - `/filters`
 - `/pnl`
+- `/learn <window>` e.g. `/learn 12h`
+- `/lessons`
 - `/walletadd <label> <address>`
 - `/walletremove <label>`
 - `/wallets`
@@ -159,12 +161,16 @@ SQLite is the source of truth. Charon creates these tables on boot:
 - `saved_wallets`
 - `settings`
 - `signal_events`
+- `learning_runs`
+- `learning_lessons`
 
 Open positions resume monitoring after restart.
 
 Live mode requires `TRADING_MODE=live`, `SOLANA_PRIVATE_KEY`, and `JUPITER_API_KEY`. Keep `dry_run` for simulation.
 
 `decision_logs` stores the entry decision journal: selected token data, full candidate snapshot, batch context, guardrail state, action taken, and execution result/error. Use it later to tune prompts, filters, and risk rules.
+
+`/learn <window>` runs a manual learning pass over dry-run evidence. It summarizes closed dry-run PnL, route performance, LLM batch decisions, and guardrail actions, then stores active lessons in `learning_lessons`. Future LLM screening prompts include the latest active lessons.
 
 ## Configuration Reloading
 
