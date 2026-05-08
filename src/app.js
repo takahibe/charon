@@ -15,7 +15,7 @@ import {
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID,
   TELEGRAM_TOPIC_ID,
-  HELIUS_API_KEY,
+  SOLANA_WS_URL,
   GMGN_API_KEY,
   JUPITER_API_KEY,
   LIVE_MIN_SOL_RESERVE_LAMPORTS,
@@ -2514,7 +2514,7 @@ async function processLog(logInfo) {
 }
 
 function startWebsocket() {
-  const wsUrl = `wss://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
+  const wsUrl = SOLANA_WS_URL;
   let ws;
   let pingTimer;
   function connect() {

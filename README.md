@@ -10,7 +10,7 @@ It is designed to trade slowly enough to survive: filters first, batch screening
 
 - Polls `https://advanced-api-v2.pump.fun/coins/graduated`.
 - Polls Jupiter `GET /tokens/v2/toptrending/:window` for Pump-related trending mints by default. GMGN `GET /v1/market/rank` remains available as an optional trending source.
-- Listens to Pump fee-claim logs through Helius WebSocket.
+- Listens to Pump fee-claim logs through the configured Solana WebSocket.
 - Creates candidates from fee + graduated, fee + trending, or fee + graduated + trending.
 - Optional degen mode can also create candidates from graduated + trending without a fee claim.
 - Enriches with GMGN `GET /v1/token/info`, Jupiter asset search fallback market data, Jupiter holders, saved-wallet holdings/PnL, chart context, and fxtwitter narrative text when a social URL exists.
@@ -33,7 +33,7 @@ Required env:
 
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
-- `HELIUS_API_KEY`
+- `HELIUS_API_KEY` unless both `SOLANA_RPC_URL` and `SOLANA_WS_URL` are set
 - `GMGN_API_KEY`
 
 Optional env:
@@ -42,6 +42,7 @@ Optional env:
 - `DB_PATH`
 - `TRADING_MODE`
 - `SOLANA_RPC_URL`
+- `SOLANA_WS_URL`
 - `SOLANA_PRIVATE_KEY`
 - `JUPITER_API_KEY`
 - `JUPITER_SWAP_BASE_URL`
