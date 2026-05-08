@@ -3,6 +3,7 @@ import Database from 'better-sqlite3';
 import TelegramBot from 'node-telegram-bot-api';
 import WebSocket from 'ws';
 import { randomUUID } from 'node:crypto';
+import https from 'node:https';
 import {
   APP_NAME,
   DB_PATH,
@@ -45,6 +46,9 @@ const gmgnCache = new Map();
 const seenFeeClaims = new Map();
 const seenSignalCandidates = new Map();
 const pendingNumericInputs = new Map();
+const gmgnHttpsAgent = new https.Agent({ family: 4, keepAlive: true });
+const jupiterAssetCache = new Map();
+let jupiterAssetBackoffUntil = 0;
 const gmgnBackoff = {
   tokenUntil: 0,
   tokenReason: '',
@@ -98,6 +102,18 @@ function gmgnStatusText(kind) {
   if (!gmgnBackoffActive(kind)) return 'ok';
   const seconds = Math.max(1, Math.ceil((Number(gmgnBackoff[key]) - now()) / 1000));
   return `blocked ${seconds}s`;
+}
+
+function jupiterAssetBackoffActive() {
+  return now() < jupiterAssetBackoffUntil;
+}
+
+function setJupiterAssetBackoff(err) {
+  if (err.response?.status !== 429) return;
+  const resetHeader = Number(err.response?.headers?.['x-ratelimit-reset'] || 0);
+  const resetMs = resetHeader > 1_000_000_000_000 ? resetHeader : resetHeader * 1000;
+  jupiterAssetBackoffUntil = resetMs > now() ? resetMs : now() + 30_000;
+  console.log(`[asset] backing off until ${new Date(jupiterAssetBackoffUntil).toISOString()} (429)`);
 }
 
 function initDb() {
@@ -557,6 +573,7 @@ async function fetchGmgnTrendingRows(interval, limit) {
   const res = await axios.get(url.toString(), {
     timeout: 10_000,
     headers: { ...JSON_HEADERS, 'X-APIKEY': GMGN_API_KEY },
+    httpsAgent: gmgnHttpsAgent,
   });
   return normalizedTrendingRows(res.data).map((row, index) => ({
     ...row,
@@ -622,6 +639,7 @@ async function fetchGmgnTokenInfo(mint, useCache = true) {
     const res = await axios.get(url.toString(), {
       timeout: 7000,
       headers: { ...JSON_HEADERS, 'X-APIKEY': GMGN_API_KEY },
+      httpsAgent: gmgnHttpsAgent,
     });
     const data = res.data?.data?.data || res.data?.data || res.data;
     gmgnCache.set(mint, { at: now(), data });
@@ -636,7 +654,10 @@ async function fetchGmgnTokenInfo(mint, useCache = true) {
   }
 }
 
-async function fetchJupiterAsset(mint) {
+async function fetchJupiterAsset(mint, { useCache = true, ttlMs = 20_000 } = {}) {
+  const cached = jupiterAssetCache.get(mint);
+  if (useCache && cached && now() - cached.at < ttlMs) return cached.data;
+  if (jupiterAssetBackoffActive()) return cached?.data || null;
   try {
     const url = new URL('https://datapi.jup.ag/v1/assets/search');
     url.searchParams.set('query', mint);
@@ -645,10 +666,13 @@ async function fetchJupiterAsset(mint) {
       headers: JSON_HEADERS,
     });
     const rows = Array.isArray(res.data) ? res.data : [];
-    return rows.find(row => row?.id === mint) || rows[0] || null;
+    const data = rows.find(row => row?.id === mint) || rows[0] || null;
+    jupiterAssetCache.set(mint, { at: now(), data });
+    return data;
   } catch (err) {
-    console.log(`[asset] ${mint.slice(0, 8)}... ${err.response?.status || ''} ${err.message}`);
-    return null;
+    setJupiterAssetBackoff(err);
+    if (err.response?.status !== 429) console.log(`[asset] ${mint.slice(0, 8)}... ${err.response?.status || ''} ${err.message}`);
+    return cached?.data || null;
   }
 }
 
@@ -1418,7 +1442,7 @@ function storeBatchDecision(triggerCandidateId, rows, decision) {
 
 async function freshEntryMarket(mint, candidate) {
   const gmgn = await fetchGmgnTokenInfo(mint, false);
-  const asset = await fetchJupiterAsset(mint);
+  const asset = await fetchJupiterAsset(mint, { useCache: false });
   const priceUsd = firstPositiveNumber(tokenPriceFromGmgn(gmgn), asset?.usdPrice, candidate.metrics?.priceUsd);
   const marketCapUsd = firstPositiveNumber(
     marketCapFromGmgn(gmgn),
@@ -1434,7 +1458,7 @@ async function refreshCandidateForExecution(row) {
   const candidate = row.candidate;
   const mint = candidate.token.mint;
   const gmgn = await fetchGmgnTokenInfo(mint, false);
-  const asset = await fetchJupiterAsset(mint);
+  const asset = await fetchJupiterAsset(mint, { useCache: false });
   const holders = await fetchJupiterHolders(mint);
   const chart = await fetchJupiterChartContext(mint);
   const selectedTrending = trending.get(mint) || candidate.trending || null;
