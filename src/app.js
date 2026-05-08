@@ -1148,9 +1148,33 @@ function candidateById(id) {
   return row ? { ...row, candidate: safeJson(row.candidate_json, {}) } : null;
 }
 
+function candidatesByIds(ids) {
+  return ids.map(id => candidateById(Number(id))).filter(Boolean);
+}
+
 function latestCandidateByMint(mint) {
   const row = db.prepare('SELECT * FROM candidates WHERE mint = ? ORDER BY id DESC LIMIT 1').get(mint);
   return row ? { ...row, candidate: safeJson(row.candidate_json, {}) } : null;
+}
+
+function batchById(id) {
+  const row = db.prepare('SELECT * FROM llm_batches WHERE id = ?').get(id);
+  if (!row) return null;
+  const candidateIds = safeJson(row.candidate_ids_json, []);
+  return {
+    ...row,
+    candidateIds,
+    rows: candidatesByIds(candidateIds),
+    decision: {
+      verdict: row.verdict,
+      confidence: row.confidence,
+      reason: row.reason,
+      risks: safeJson(row.risks_json, []),
+      raw: safeJson(row.raw_json, null),
+      selected_candidate_id: row.selected_candidate_id,
+      selected_mint: row.selected_mint,
+    },
+  };
 }
 
 function recentEligibleCandidates(limit = 10) {
@@ -1670,6 +1694,47 @@ function candidateButtons(candidateId, decision = null) {
   };
 }
 
+function compactCandidateLine(row, index = null) {
+  const candidate = row.candidate;
+  const prefix = index == null ? '' : `${index}. `;
+  const name = candidate.token?.symbol || candidate.token?.name || short(candidate.token?.mint || '');
+  const signal = candidate.signals?.label || signalLabel(candidate.signals);
+  return [
+    `${prefix}<b>${escapeHtml(name)}</b>`,
+    `<a href="${gmgnLink(candidate.token.mint)}">${short(candidate.token.mint)}</a>`,
+    escapeHtml(signal),
+    `mcap ${fmtUsd(candidate.metrics?.marketCapUsd)}`,
+    `liq ${fmtUsd(candidate.metrics?.liquidityUsd)}`,
+    candidate.feeClaim ? `fee ${fmtSol(candidate.feeClaim.distributedSol)} SOL` : null,
+  ].filter(Boolean).join(' · ');
+}
+
+function batchRevealSummary(batchId, rows, decision, triggerCandidateId = null) {
+  const selected = rows.find(row => row.id === Number(decision.selected_candidate_id));
+  const trigger = rows.find(row => row.id === Number(triggerCandidateId));
+  const lines = [
+    '🧭 <b>Charon Screening</b>',
+    '',
+    `Batch: <b>#${batchId}</b> · Screened: <b>${rows.length}</b>`,
+    trigger ? `Trigger: ${compactCandidateLine(trigger)}` : null,
+    selected ? `Pick: ${compactCandidateLine(selected)}` : 'Pick: <b>none</b>',
+    `Decision: <b>${escapeHtml(decision.verdict || 'WATCH')}</b> ${fmtPct(decision.confidence || 0)}`,
+    decision.reason ? `Reason: ${escapeHtml(String(decision.reason).slice(0, 420))}` : null,
+  ];
+  return lines.filter(Boolean).join('\n');
+}
+
+function batchRevealButtons(batchId, rows, decision, triggerCandidateId = null) {
+  const selectedId = Number(decision.selected_candidate_id || 0);
+  const triggerId = Number(triggerCandidateId || 0);
+  const keyboard = [];
+  if (selectedId) keyboard.push([{ text: 'Reveal Pick', callback_data: `cand:${selectedId}` }]);
+  keyboard.push([{ text: 'Reveal Batch', callback_data: `batch:${batchId}` }]);
+  if (triggerId && triggerId !== selectedId) keyboard.push([{ text: 'Reveal Trigger', callback_data: `cand:${triggerId}` }]);
+  keyboard.push([{ text: 'Positions', callback_data: 'menu:positions' }]);
+  return { reply_markup: { inline_keyboard: keyboard } };
+}
+
 function positionButtons(positionId) {
   return {
     reply_markup: {
@@ -1707,6 +1772,47 @@ async function sendCandidateAlert(candidateId, candidate, decision) {
     INSERT INTO alerts (candidate_id, mint, kind, sent_at_ms, telegram_message_id, payload_json)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(candidateId, candidate.token.mint, 'candidate', now(), sent.message_id, json({ candidate, decision }));
+}
+
+async function sendBatchReveal(batchId, rows, decision, triggerCandidateId) {
+  const sent = await sendTelegram(
+    batchRevealSummary(batchId, rows, decision, triggerCandidateId),
+    batchRevealButtons(batchId, rows, decision, triggerCandidateId),
+  );
+  db.prepare(`
+    INSERT INTO alerts (candidate_id, mint, kind, sent_at_ms, telegram_message_id, payload_json)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    triggerCandidateId || null,
+    decision.selected_mint || rows.find(row => row.id === Number(triggerCandidateId))?.candidate?.token?.mint || 'batch',
+    'batch_reveal',
+    now(),
+    sent.message_id,
+    json({ batchId, candidateIds: rows.map(row => row.id), decision, triggerCandidateId }),
+  );
+}
+
+async function sendBatch(chatId, batchId) {
+  const batch = batchById(batchId);
+  if (!batch) return bot.sendMessage(chatId, 'Batch not found.');
+  const lines = [
+    '🧭 <b>Screening Batch</b>',
+    '',
+    `Batch: <b>#${batchId}</b> · Decision: <b>${escapeHtml(batch.verdict)}</b> ${fmtPct(batch.confidence)}`,
+    batch.reason ? `Reason: ${escapeHtml(String(batch.reason).slice(0, 500))}` : null,
+    '',
+    ...batch.rows.map((row, index) => compactCandidateLine(row, index + 1)),
+  ];
+  const keyboard = batch.rows.slice(0, 10).map((row, index) => ([{
+    text: `${index + 1}. ${row.candidate.token?.symbol || short(row.candidate.token?.mint || '')}`,
+    callback_data: `cand:${row.id}`,
+  }]));
+  keyboard.push([{ text: 'Positions', callback_data: 'menu:positions' }]);
+  return bot.sendMessage(chatId, lines.filter(Boolean).join('\n'), {
+    parse_mode: 'HTML',
+    disable_web_page_preview: true,
+    reply_markup: { inline_keyboard: keyboard },
+  });
 }
 
 function formatPosition(position) {
@@ -2021,7 +2127,6 @@ async function processCandidateFromSignals(signals) {
   const currentDecisionId = storeDecision(candidateId, candidate, currentDecision);
   currentDecision.id = currentDecisionId;
   updateCandidateStatus(candidateId, currentDecision.verdict.toLowerCase());
-  await sendCandidateAlert(candidateId, candidate, currentDecision);
 
   if (selectedRow && !selectedThisCandidate) {
     const selectedDecisionId = storeDecision(selectedRow.id, selectedRow.candidate, batchDecision);
@@ -2030,6 +2135,8 @@ async function processCandidateFromSignals(signals) {
   } else if (selectedThisCandidate) {
     batchDecision.id = currentDecisionId;
   }
+
+  await sendBatchReveal(batchId, rows, batchDecision, candidateId);
 
   if (selectedRow && boolSetting('agent_enabled', true) && batchDecision.verdict === 'BUY' && batchDecision.confidence >= numSetting('llm_min_confidence', 75)) {
     if (!canOpenMorePositions()) {
@@ -2397,6 +2504,7 @@ async function handleCallback(query) {
   const [kind, id, value] = data.split(':');
   if (kind === 'input') return requestNumericFilterInput(chatId, id);
   if (kind === 'set') return updateSettingFromButton(chatId, id, value);
+  if (kind === 'batch') return sendBatch(chatId, Number(id));
   if (kind === 'intent') {
     if (value === 'confirm') return executeConfirmedIntent(chatId, Number(id));
     if (value === 'reject') return rejectIntent(chatId, Number(id));
