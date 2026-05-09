@@ -3,7 +3,8 @@ import { numSetting, boolSetting, strategyById } from '../db/settings.js';
 import { db } from '../db/connection.js';
 import { firstPositiveNumber, marketCapFromGmgn, tokenPriceFromGmgn } from '../utils.js';
 import { fetchGmgnTokenInfo } from '../enrichment/gmgn.js';
-import { fetchJupiterAsset, fetchJupiterHolders, fetchJupiterChartContext } from '../enrichment/jupiter.js';
+import { fetchJupiterAsset, fetchJupiterHolders, fetchJupiterChartContext, fetchJupiterWalletPnl } from '../enrichment/jupiter.js';
+import { liveWalletPubkey } from '../liveExecutor.js';
 import { fetchSavedWalletExposure } from '../enrichment/wallets.js';
 import { filterCandidate } from '../pipeline/candidateBuilder.js';
 import { openPositions } from '../db/positions.js';
@@ -104,7 +105,9 @@ export async function refreshCandidateForExecution(row) {
   return { ...row, candidate: refreshed };
 }
 
-export async function refreshPosition(position, { autoExit = true } = {}) {
+const sellInProgress = new Set();
+
+export async function refreshPosition(position, { autoExit = true, jupiterPnl = null } = {}) {
   const asset = await fetchJupiterAsset(position.mint);
   const price = firstPositiveNumber(asset?.usdPrice, position.high_water_price, position.entry_price);
   const mcap = firstPositiveNumber(asset?.mcap, asset?.fdv, position.high_water_mcap, position.entry_mcap);
@@ -113,8 +116,12 @@ export async function refreshPosition(position, { autoExit = true } = {}) {
   }
   const highWaterMcap = Math.max(Number(position.high_water_mcap || 0), Number(mcap));
   const highWaterPrice = Math.max(Number(position.high_water_price || 0), Number(price || 0));
-  const pnlPercent = (Number(mcap) / Number(position.entry_mcap) - 1) * 100;
-  const pnlSol = Number(position.size_sol) * pnlPercent / 100;
+  let pnlPercent = (Number(mcap) / Number(position.entry_mcap) - 1) * 100;
+  let pnlSol = Number(position.size_sol) * pnlPercent / 100;
+  if (jupiterPnl && Number.isFinite(Number(jupiterPnl.totalPnlPercentageNative))) {
+    pnlPercent = Number(jupiterPnl.totalPnlPercentageNative);
+    pnlSol = Number.isFinite(Number(jupiterPnl.totalPnlNative)) ? Number(jupiterPnl.totalPnlNative) : pnlSol;
+  }
   const tpHit = pnlPercent >= Number(position.tp_percent);
   const slHit = pnlPercent <= Number(position.sl_percent);
   const trailingArmed = position.trailing_armed || (position.trailing_enabled && tpHit);
@@ -161,6 +168,10 @@ export async function refreshPosition(position, { autoExit = true } = {}) {
     else if (trailingHit) exitReason = 'TRAILING_TP';
   }
 
+  // Live exits will override these with realized SOL values
+  let finalPnlPercent = pnlPercent;
+  let finalPnlSol = pnlSol;
+
   db.prepare(`
     UPDATE dry_run_positions
     SET high_water_mcap = ?, high_water_price = ?, trailing_armed = ?
@@ -168,17 +179,30 @@ export async function refreshPosition(position, { autoExit = true } = {}) {
   `).run(highWaterMcap, highWaterPrice, trailingArmed ? 1 : 0, position.id);
 
   if (exitReason && autoExit && position.execution_mode === 'live') {
-    const sell = await executeLiveSell(position, exitReason);
+    if (sellInProgress.has(position.id)) return { ...position, exitReason: null };
+    sellInProgress.add(position.id);
+    let sell;
+    try {
+      sell = await executeLiveSell(position, exitReason);
+    } finally {
+      sellInProgress.delete(position.id);
+    }
+    const receivedLamports = Number(sell.outputAmount || 0);
+    const receivedSol = receivedLamports > 0 ? receivedLamports / 1_000_000_000 : null;
+    if (receivedSol != null) {
+      finalPnlSol = receivedSol - Number(position.size_sol);
+      finalPnlPercent = (receivedSol / Number(position.size_sol) - 1) * 100;
+    }
     db.prepare(`
       UPDATE dry_run_positions
       SET status = 'closed', closed_at_ms = ?, exit_price = ?, exit_mcap = ?, exit_reason = ?,
           pnl_percent = ?, pnl_sol = ?, exit_signature = ?
       WHERE id = ?
-    `).run(now(), price, mcap, exitReason, pnlPercent, pnlSol, sell.signature, position.id);
+    `).run(now(), price, mcap, exitReason, finalPnlPercent, finalPnlSol, sell.signature, position.id);
     db.prepare(`
       INSERT INTO dry_run_trades (position_id, mint, side, at_ms, price, mcap, size_sol, token_amount_est, reason, payload_json)
       VALUES (?, ?, 'sell', ?, ?, ?, ?, ?, ?, ?)
-    `).run(position.id, position.mint, now(), price, mcap, position.size_sol, position.token_amount_est, exitReason, json({ pnlPercent, pnlSol, sell }));
+    `).run(position.id, position.mint, now(), price, mcap, position.size_sol, position.token_amount_est, exitReason, json({ pnlPercent: finalPnlPercent, pnlSol: finalPnlSol, receivedSol: receivedSol ?? null, sell }));
     closed = true;
   } else if (exitReason && autoExit) {
     db.prepare(`
@@ -202,10 +226,10 @@ export async function refreshPosition(position, { autoExit = true } = {}) {
     highWaterMcap,
     high_water_mcap: highWaterMcap,
     high_water_price: highWaterPrice,
-    pnlPercent,
-    pnl_percent: pnlPercent,
-    pnlSol,
-    pnl_sol: pnlSol,
+    pnlPercent: finalPnlPercent,
+    pnl_percent: finalPnlPercent,
+    pnlSol: finalPnlSol,
+    pnl_sol: finalPnlSol,
     exitReason: closed ? exitReason : null,
     exit_reason: closed ? exitReason : position.exit_reason,
     exit_mcap: closed ? mcap : position.exit_mcap,
@@ -214,8 +238,17 @@ export async function refreshPosition(position, { autoExit = true } = {}) {
 }
 
 export async function monitorPositions() {
-  for (const position of openPositions()) {
-    const result = await refreshPosition(position).catch((err) => {
+  const positions = openPositions();
+  let walletPnlData = {};
+  const pubkey = liveWalletPubkey();
+  if (pubkey && positions.some(p => p.execution_mode === 'live')) {
+    walletPnlData = await fetchJupiterWalletPnl(pubkey);
+  }
+  for (const position of positions) {
+    const jupiterPnl = position.execution_mode === 'live'
+      ? (walletPnlData[position.mint]?.pnl || null)
+      : null;
+    const result = await refreshPosition(position, { autoExit: true, jupiterPnl }).catch((err) => {
       console.log(`[position] ${position.id} ${err.message}`);
       return null;
     });

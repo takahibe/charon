@@ -3,7 +3,8 @@ import { numSetting, boolSetting } from '../db/settings.js';
 import { db } from '../db/connection.js';
 import { WSOL_MINT, LIVE_MIN_SOL_RESERVE_LAMPORTS } from '../config.js';
 import { escapeHtml, fmtSol } from '../format.js';
-import { executeJupiterSwap, liveWalletBalanceLamports } from '../liveExecutor.js';
+import { executeJupiterSwap, liveWalletBalanceLamports, fetchLiveTokenBalance } from '../liveExecutor.js';
+import { activeStrategy } from '../db/settings.js';
 import { createLivePosition, canOpenMorePositions, openPositionCount } from '../db/positions.js';
 import { intentById } from '../db/intents.js';
 import { logDecisionEvent } from '../db/decisions.js';
@@ -15,7 +16,8 @@ import { updateCandidateStatus } from '../db/candidates.js';
 import { createTradeIntent } from '../db/intents.js';
 
 export async function executeLiveBuy(selectedRow, decision, batchId, rows = [], triggerCandidateId = null) {
-  const amountLamports = Math.floor(numSetting('dry_run_buy_sol', 0.1) * 1_000_000_000);
+  const strat = activeStrategy();
+  const amountLamports = Math.floor((strat.position_size_sol ?? numSetting('dry_run_buy_sol', 0.1)) * 1_000_000_000);
   const balance = await liveWalletBalanceLamports();
   if (balance < amountLamports + LIVE_MIN_SOL_RESERVE_LAMPORTS) {
     throw new Error(`Insufficient SOL balance. Need ${fmtSol((amountLamports + LIVE_MIN_SOL_RESERVE_LAMPORTS) / 1_000_000_000)} SOL including reserve.`);
@@ -25,6 +27,9 @@ export async function executeLiveBuy(selectedRow, decision, batchId, rows = [], 
     outputMint: selectedRow.candidate.token.mint,
     amount: amountLamports,
   });
+  if (!swap.outputAmount) {
+    swap.outputAmount = await fetchLiveTokenBalance(selectedRow.candidate.token.mint) || swap.outputAmount;
+  }
   const positionId = createLivePosition(selectedRow.id, selectedRow.candidate, decision, swap, `live_batch_${batchId}`);
   logDecisionEvent({
     batchId,
@@ -72,14 +77,34 @@ export async function executeConfirmedIntent(chatId, intentId) {
         `Failures: ${escapeHtml((freshRow.candidate.filters?.failures || []).join('; ') || 'fresh execution guard failed')}`,
       ].join('\n'), { parse_mode: 'HTML', disable_web_page_preview: true });
     }
-    const amountLamports = Math.floor(numSetting('dry_run_buy_sol', 0.1) * 1_000_000_000);
+    const strat = activeStrategy();
+    const amountLamports = Math.floor((strat.position_size_sol ?? numSetting('dry_run_buy_sol', 0.1)) * 1_000_000_000);
+    const balance = await liveWalletBalanceLamports();
+    if (balance < amountLamports + LIVE_MIN_SOL_RESERVE_LAMPORTS) {
+      db.prepare('UPDATE trade_intents SET status = ?, updated_at_ms = ? WHERE id = ?').run('rejected_insufficient_balance', now(), intentId);
+      return bot.sendMessage(chatId, `Insufficient SOL balance. Need ${fmtSol((amountLamports + LIVE_MIN_SOL_RESERVE_LAMPORTS) / 1_000_000_000)} SOL.`, { parse_mode: 'HTML' });
+    }
     const swap = await executeJupiterSwap({
       inputMint: WSOL_MINT,
       outputMint: freshRow.candidate.token.mint,
       amount: amountLamports,
     });
+    if (!swap.outputAmount) {
+      swap.outputAmount = await fetchLiveTokenBalance(freshRow.candidate.token.mint) || swap.outputAmount;
+    }
     const positionId = createLivePosition(intent.candidate_id, freshRow.candidate, decision, swap, `confirmed_intent_${intentId}`);
     db.prepare('UPDATE trade_intents SET status = ?, updated_at_ms = ? WHERE id = ?').run('executed_live', now(), intentId);
+    logDecisionEvent({
+      batchId: null,
+      triggerCandidateId: intent.candidate_id,
+      selectedRow: freshRow,
+      rows: [],
+      decision,
+      mode: 'live',
+      action: 'confirmed_intent_executed',
+      guardrails: { balanceLamports: balance, amountLamports, intentId },
+      execution: { positionId, swap },
+    });
     return sendPositionOpen(positionId);
   } catch (err) {
     db.prepare('UPDATE trade_intents SET status = ?, updated_at_ms = ? WHERE id = ?').run('execution_failed', now(), intentId);

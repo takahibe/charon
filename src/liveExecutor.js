@@ -1,6 +1,6 @@
 import axios from 'axios';
 import bs58 from 'bs58';
-import { Connection, Keypair, VersionedTransaction } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey, VersionedTransaction } from '@solana/web3.js';
 import {
   JUPITER_API_KEY,
   JUPITER_SLIPPAGE_BPS,
@@ -33,6 +33,25 @@ export function initLiveExecution() {
   }
 }
 
+export function liveWalletPubkey() {
+  return liveWallet?.publicKey?.toBase58() || null;
+}
+
+export async function fetchLiveTokenBalance(mint) {
+  if (!liveWallet || !solanaConnection) return null;
+  try {
+    const accounts = await solanaConnection.getParsedTokenAccountsByOwner(
+      liveWallet.publicKey,
+      { mint: new PublicKey(mint) },
+      'confirmed',
+    );
+    return accounts.value[0]?.account?.data?.parsed?.info?.tokenAmount?.amount || null;
+  } catch (err) {
+    console.log(`[live] token balance ${mint.slice(0, 8)}... ${err.message}`);
+    return null;
+  }
+}
+
 export function requireLiveExecution() {
   if (!liveWallet || !solanaConnection) throw new Error('SOLANA_PRIVATE_KEY is required for live execution.');
   if (!JUPITER_API_KEY) throw new Error('JUPITER_API_KEY is required for live execution.');
@@ -50,16 +69,19 @@ async function jupiterOrder({ inputMint, outputMint, amount }) {
   url.searchParams.set('outputMint', outputMint);
   url.searchParams.set('amount', String(amount));
   url.searchParams.set('taker', liveWallet.publicKey.toBase58());
-  url.searchParams.set('slippageBps', String(JUPITER_SLIPPAGE_BPS));
   const res = await axios.get(url.toString(), {
     timeout: 20_000,
     headers: { ...JSON_HEADERS, 'x-api-key': JUPITER_API_KEY },
   });
-  return res.data;
+  const order = res.data;
+  if (order.errorCode || order.error) {
+    throw new Error(`Jupiter order failed: ${order.errorMessage || order.error || order.errorCode}`);
+  }
+  return order;
 }
 
 function orderTransactionBase64(order) {
-  return order?.transaction || order?.swapTransaction || order?.requestId?.transaction;
+  return order?.transaction || order?.swapTransaction || null;
 }
 
 function signTransactionBase64(transactionBase64) {
@@ -90,11 +112,15 @@ export async function executeJupiterSwap({ inputMint, outputMint, amount }) {
   if (executed?.status && executed.status !== 'Success') {
     throw new Error(`Jupiter execute failed: ${executed.error || executed.code || executed.status}`);
   }
+  const signature = executed?.signature || executed?.txid || executed?.transactionId || null;
+  if (!signature) {
+    throw new Error(`Jupiter execute returned no signature (status: ${executed?.status || 'unknown'})`);
+  }
   return {
     order,
     executed,
-    signature: executed?.signature || executed?.txid || executed?.transactionId || null,
+    signature,
     inputAmount: String(amount),
-    outputAmount: String(executed?.outputAmountResult || executed?.totalOutputAmount || order?.outAmount || order?.outputAmount || ''),
+    outputAmount: String(executed?.outputAmountResult || executed?.totalOutputAmount || order?.outAmount || ''),
   };
 }

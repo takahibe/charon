@@ -200,6 +200,27 @@ async function fetchJupiterChartContext(mint) {
   };
 }
 
+const IGNORED_PNL_MINTS = new Set([
+  'So11111111111111111111111111111111111111111',
+  'So11111111111111111111111111111111111111112',
+  'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+]);
+
+async function fetchJupiterWalletPnl(walletAddress) {
+  try {
+    const url = new URL('https://datapi.jup.ag/v1/pnl');
+    url.searchParams.set('addresses', walletAddress);
+    url.searchParams.set('includeClosed', 'false');
+    const res = await axios.get(url.toString(), { timeout: 10_000, headers: JSON_HEADERS });
+    const data = res.data?.[walletAddress] || {};
+    for (const mint of IGNORED_PNL_MINTS) delete data[mint];
+    return data;
+  } catch (err) {
+    console.log(`[pnl] ${err.response?.status || ''} ${err.message}`);
+    return {};
+  }
+}
+
 export {
   jupiterStatsForInterval,
   normalizeJupiterTrendingRow,
@@ -210,6 +231,7 @@ export {
   summarizeCandles,
   fetchJupiterChartWindow,
   fetchJupiterChartContext,
+  fetchJupiterWalletPnl,
   jupiterAssetBackoffActive,
   setJupiterAssetBackoff,
 };

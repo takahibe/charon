@@ -48,7 +48,7 @@ export async function requestStrategyNumericInput(query, key) {
   );
 }
 
-export async function consumeNumericFilterInput(chatId, text) {
+export async function consumeNumericFilterInput(chatId, text, userMessageId = null) {
   const pending = pendingNumericInputs.get(String(chatId));
   if (!pending) return false;
   if (now() - pending.at > 5 * 60 * 1000) {
@@ -62,6 +62,7 @@ export async function consumeNumericFilterInput(chatId, text) {
     return true;
   }
   pendingNumericInputs.delete(String(chatId));
+  if (userMessageId) bot.deleteMessage(chatId, userMessageId).catch(() => {});
   if (pending.type === 'strategy') {
     const strat = activeStrategy();
     if (strat.id !== pending.strategyId) {

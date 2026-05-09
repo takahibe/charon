@@ -33,7 +33,7 @@ import { fetchWalletPnl } from '../enrichment/wallets.js';
 export async function handleMessage(msg) {
   const text = (msg.text || '').trim();
   const chatId = msg.chat.id;
-  if (await consumeNumericFilterInput(chatId, text)) return;
+  if (await consumeNumericFilterInput(chatId, text, msg.message_id)) return;
   if (!text.startsWith('/')) return;
   if (text.startsWith('/menu')) return sendMenu(chatId);
   if (text.startsWith('/positions')) return sendPositions(chatId);
