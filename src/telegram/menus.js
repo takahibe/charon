@@ -65,6 +65,33 @@ export const numericFilterLabels = {
   trending_max_bundler_rate: 'maximum GMGN trending bundler rate (0.5 = 50%)',
 };
 
+export const strategyNumericLabels = {
+  min_fee_claim_sol: 'minimum fee claim SOL',
+  min_mcap_usd: 'minimum mcap USD',
+  max_mcap_usd: 'maximum mcap USD',
+  min_gmgn_total_fee_sol: 'minimum GMGN fees SOL',
+  min_graduated_volume_usd: 'minimum graduated volume USD',
+  min_holders: 'minimum holders',
+  max_top20_holder_percent: 'maximum top holder percent',
+  min_saved_wallet_holders: 'minimum saved-wallet holders',
+  max_ath_distance_pct: 'maximum ATH distance percent (-40 = 40% below ATH, 0 = off)',
+  min_source_count: 'minimum source count',
+  token_age_max_ms: 'maximum token age milliseconds',
+  trending_min_volume_usd: 'minimum trending volume USD',
+  trending_min_swaps: 'minimum trending swaps',
+  trending_max_rug_ratio: 'maximum trending rug ratio (0.3 = 30%)',
+  trending_max_bundler_rate: 'maximum trending bundler rate (0.5 = 50%)',
+  llm_min_confidence: 'LLM minimum confidence percent',
+  position_size_sol: 'position size SOL',
+  max_open_positions: 'maximum open positions',
+  tp_percent: 'take profit percent',
+  sl_percent: 'stop loss percent',
+  trailing_percent: 'trailing percent',
+  partial_tp_at_percent: 'partial TP trigger percent',
+  partial_tp_sell_percent: 'partial TP sell percent',
+  max_hold_ms: 'maximum hold milliseconds',
+};
+
 export function filtersKeyboard() {
   return {
     reply_markup: {
@@ -197,32 +224,59 @@ export function strategyKeyboard() {
   }]);
   const config = [
     [
-      { text: `TP +${strat.tp_percent}%`, callback_data: 'stratcfg:tp_percent' },
-      { text: `SL ${strat.sl_percent}%`, callback_data: 'stratcfg:sl_percent' },
+      { text: `TP +${strat.tp_percent}%`, callback_data: 'stratinput:tp_percent' },
+      { text: `SL ${strat.sl_percent}%`, callback_data: 'stratinput:sl_percent' },
     ],
     [
-      { text: `Size ${strat.position_size_sol} SOL`, callback_data: 'stratcfg:position_size_sol' },
-      { text: `Max Pos ${strat.max_open_positions}`, callback_data: 'stratcfg:max_open_positions' },
+      { text: `Size ${strat.position_size_sol} SOL`, callback_data: 'stratinput:position_size_sol' },
+      { text: `Max Pos ${strat.max_open_positions}`, callback_data: 'stratinput:max_open_positions' },
     ],
     [
-      { text: `Min Mcap ${strat.min_mcap_usd > 0 ? fmtUsd(strat.min_mcap_usd) : 'off'}`, callback_data: 'stratcfg:min_mcap_usd' },
-      { text: `Max Mcap ${strat.max_mcap_usd > 0 ? fmtUsd(strat.max_mcap_usd) : 'off'}`, callback_data: 'stratcfg:max_mcap_usd' },
+      { text: `Min Mcap ${strat.min_mcap_usd > 0 ? fmtUsd(strat.min_mcap_usd) : 'off'}`, callback_data: 'stratinput:min_mcap_usd' },
+      { text: `Max Mcap ${strat.max_mcap_usd > 0 ? fmtUsd(strat.max_mcap_usd) : 'off'}`, callback_data: 'stratinput:max_mcap_usd' },
     ],
     [
-      { text: `Trail ${strat.trailing_enabled ? fmtPct(strat.trailing_percent) : 'off'}`, callback_data: 'stratcfg:trailing_percent' },
-      { text: `Min Src ${strat.min_source_count}`, callback_data: 'stratcfg:min_source_count' },
+      { text: `Trail ${strat.trailing_enabled ? fmtPct(strat.trailing_percent) : 'off'}`, callback_data: 'stratinput:trailing_percent' },
+      { text: `Min Src ${strat.min_source_count}`, callback_data: 'stratinput:min_source_count' },
     ],
     [
       { text: `Fee Req ${strat.require_fee_claim ? 'on' : 'off'}`, callback_data: 'stratcfg:require_fee_claim' },
       { text: `LLM ${strat.use_llm ? 'on' : 'off'}`, callback_data: 'stratcfg:use_llm' },
     ],
     [
-      { text: `Min Holders ${strat.min_holders}`, callback_data: 'stratcfg:min_holders' },
-      { text: `Conf ${strat.llm_min_confidence}%`, callback_data: 'stratcfg:llm_min_confidence' },
+      { text: `Min Holders ${strat.min_holders}`, callback_data: 'stratinput:min_holders' },
+      { text: `Conf ${strat.llm_min_confidence}%`, callback_data: 'stratinput:llm_min_confidence' },
     ],
     [
       { text: `Partial TP ${strat.partial_tp ? 'on' : 'off'}`, callback_data: 'stratcfg:partial_tp' },
-      { text: `Max Hold ${strat.max_hold_ms > 0 ? Math.round(strat.max_hold_ms/60000)+'m' : 'off'}`, callback_data: 'stratcfg:max_hold_ms' },
+      { text: `Max Hold ${strat.max_hold_ms > 0 ? Math.round(strat.max_hold_ms/60000)+'m' : 'off'}`, callback_data: 'stratinput:max_hold_ms' },
+    ],
+    [
+      { text: `Fee ${fmtSol(strat.min_fee_claim_sol)} SOL`, callback_data: 'stratinput:min_fee_claim_sol' },
+      { text: `Fees ${fmtSol(strat.min_gmgn_total_fee_sol)} SOL`, callback_data: 'stratinput:min_gmgn_total_fee_sol' },
+    ],
+    [
+      { text: `Grad Vol ${fmtUsd(strat.min_graduated_volume_usd)}`, callback_data: 'stratinput:min_graduated_volume_usd' },
+      { text: `Max Holder ${strat.max_top20_holder_percent < 100 ? fmtPct(strat.max_top20_holder_percent) : 'off'}`, callback_data: 'stratinput:max_top20_holder_percent' },
+    ],
+    [
+      { text: `Saved ${strat.min_saved_wallet_holders || 'off'}`, callback_data: 'stratinput:min_saved_wallet_holders' },
+      { text: `ATH ${strat.max_ath_distance_pct < 0 ? `${strat.max_ath_distance_pct}%` : 'off'}`, callback_data: 'stratinput:max_ath_distance_pct' },
+    ],
+    [
+      { text: `Age ${strat.token_age_max_ms > 0 ? Math.round(strat.token_age_max_ms / 60000) + 'm' : 'off'}`, callback_data: 'stratinput:token_age_max_ms' },
+      { text: `Trend Vol ${fmtUsd(strat.trending_min_volume_usd)}`, callback_data: 'stratinput:trending_min_volume_usd' },
+    ],
+    [
+      { text: `Trend Swaps ${strat.trending_min_swaps}`, callback_data: 'stratinput:trending_min_swaps' },
+      { text: `Max Rug ${fmtPct(strat.trending_max_rug_ratio * 100)}`, callback_data: 'stratinput:trending_max_rug_ratio' },
+    ],
+    [
+      { text: `Max Bundler ${fmtPct(strat.trending_max_bundler_rate * 100)}`, callback_data: 'stratinput:trending_max_bundler_rate' },
+      { text: `Partial Sell ${strat.partial_tp_sell_percent}%`, callback_data: 'stratinput:partial_tp_sell_percent' },
+    ],
+    [
+      { text: `Partial At ${strat.partial_tp_at_percent}%`, callback_data: 'stratinput:partial_tp_at_percent' },
     ],
   ];
   return {

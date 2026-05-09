@@ -24,13 +24,13 @@ import { storeDecision, logDecisionEvent } from '../db/decisions.js';
 import { createDryRunPosition, canOpenMorePositions, openPositionCount, tradingMode } from '../db/positions.js';
 import { executeLiveBuy, executeConfirmedIntent, rejectIntent } from '../execution/router.js';
 import { sendCandidate, sendPosition, closePosition, updatePositionRule, toggleTrailing } from './commands.js';
-import { requestNumericFilterInput } from './input.js';
+import { requestNumericFilterInput, requestStrategyNumericInput } from './input.js';
 
 export async function handleCallback(query) {
   const data = query.data || '';
   const chatId = query.message?.chat?.id || TELEGRAM_CHAT_ID;
   await answerCallback(query);
-  if (!data.startsWith('input:')) {
+  if (!data.startsWith('input:') && !data.startsWith('stratinput:')) {
     const { pendingNumericInputs } = await import('./input.js');
     pendingNumericInputs.delete(String(chatId));
   }
@@ -72,6 +72,10 @@ export async function handleCallback(query) {
   if (data.startsWith('stratcfg:')) {
     const key = data.replace('stratcfg:', '');
     return handleStratConfig(query, chatId, key);
+  }
+  if (data.startsWith('stratinput:')) {
+    const key = data.replace('stratinput:', '');
+    return requestStrategyNumericInput(query, key);
   }
 
   const [kind, id, value] = data.split(':');

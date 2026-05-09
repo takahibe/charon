@@ -1,8 +1,16 @@
 import { bot } from './bot.js';
 import { TELEGRAM_CHAT_ID } from '../config.js';
 import { now, parseNumericInput } from '../utils.js';
-import { setSetting } from '../db/settings.js';
-import { filtersText, filtersKeyboard, numericFilterLabels, navKeyboard } from './menus.js';
+import { activeStrategy, setSetting, updateStrategyConfig } from '../db/settings.js';
+import {
+  filtersText,
+  filtersKeyboard,
+  numericFilterLabels,
+  navKeyboard,
+  strategyKeyboard,
+  strategyMenuText,
+  strategyNumericLabels,
+} from './menus.js';
 
 export const pendingNumericInputs = new Map();
 
@@ -10,6 +18,7 @@ export async function requestNumericFilterInput(query, key) {
   const chatId = query.message?.chat?.id || TELEGRAM_CHAT_ID;
   if (!numericFilterLabels[key]) return bot.sendMessage(chatId, 'Unknown numeric filter.');
   pendingNumericInputs.set(String(chatId), {
+    type: 'setting',
     key,
     at: now(),
     messageId: query.message?.message_id || null,
@@ -18,6 +27,24 @@ export async function requestNumericFilterInput(query, key) {
     query,
     `Send a number for ${numericFilterLabels[key]}.\nExamples: 5, 50000, 100k, 1.5m, off`,
     navKeyboard([[{ text: 'Cancel', callback_data: 'menu:filters' }]]),
+  );
+}
+
+export async function requestStrategyNumericInput(query, key) {
+  const chatId = query.message?.chat?.id || TELEGRAM_CHAT_ID;
+  if (!strategyNumericLabels[key]) return bot.sendMessage(chatId, 'Unknown strategy setting.');
+  const strat = activeStrategy();
+  pendingNumericInputs.set(String(chatId), {
+    type: 'strategy',
+    key,
+    strategyId: strat.id,
+    at: now(),
+    messageId: query.message?.message_id || null,
+  });
+  return editMenuMessage(
+    query,
+    `Send a number for ${strat.name} ${strategyNumericLabels[key]}.\nExamples: 5, 50000, 100k, 1.5m, -40, off`,
+    navKeyboard([[{ text: 'Cancel', callback_data: 'menu:strategy' }]]),
   );
 }
 
@@ -35,17 +62,40 @@ export async function consumeNumericFilterInput(chatId, text) {
     return true;
   }
   pendingNumericInputs.delete(String(chatId));
-  setSetting(pending.key, String(value));
-  if (pending.messageId) {
-    await bot.editMessageText(filtersText(), {
-      chat_id: chatId,
-      message_id: pending.messageId,
-      parse_mode: 'HTML',
-      disable_web_page_preview: true,
-      ...filtersKeyboard(),
-    }).catch(() => bot.sendMessage(chatId, filtersText(), { parse_mode: 'HTML', ...filtersKeyboard() }));
+  if (pending.type === 'strategy') {
+    const strat = activeStrategy();
+    if (strat.id !== pending.strategyId) {
+      await bot.sendMessage(chatId, 'Strategy changed while input was pending. Open Strategy menu and try again.');
+      return true;
+    }
+    const newConfig = { ...strat, [pending.key]: value };
+    delete newConfig.id;
+    delete newConfig.name;
+    updateStrategyConfig(strat.id, newConfig);
+    if (pending.messageId) {
+      await bot.editMessageText(strategyMenuText(), {
+        chat_id: chatId,
+        message_id: pending.messageId,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        ...strategyKeyboard(),
+      }).catch(() => bot.sendMessage(chatId, strategyMenuText(), { parse_mode: 'HTML', ...strategyKeyboard() }));
+    } else {
+      await bot.sendMessage(chatId, strategyMenuText(), { parse_mode: 'HTML', ...strategyKeyboard() });
+    }
   } else {
-    await bot.sendMessage(chatId, filtersText(), { parse_mode: 'HTML', ...filtersKeyboard() });
+    setSetting(pending.key, String(value));
+    if (pending.messageId) {
+      await bot.editMessageText(filtersText(), {
+        chat_id: chatId,
+        message_id: pending.messageId,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        ...filtersKeyboard(),
+      }).catch(() => bot.sendMessage(chatId, filtersText(), { parse_mode: 'HTML', ...filtersKeyboard() }));
+    } else {
+      await bot.sendMessage(chatId, filtersText(), { parse_mode: 'HTML', ...filtersKeyboard() });
+    }
   }
   return true;
 }
