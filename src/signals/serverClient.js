@@ -55,7 +55,16 @@ export async function fetchServerSignals() {
 
       // Update graduated map
       if (signal.graduated) {
-        graduated.set(mint, { ...signal.graduated, coinMint: mint, seenAt: now() });
+        graduated.set(mint, {
+          ...signal.graduated,
+          coinMint: mint,
+          seenAt: now(),
+          // Server doesn't nest these on the graduated object — pull from top-level
+          name: signal.name,
+          ticker: signal.symbol,
+          volume: signal.volume24h ?? 0,
+          marketCap: signal.marketCapUsd ?? 0,
+        });
       }
 
       // Update trending map
@@ -68,7 +77,9 @@ export async function fetchServerSignals() {
           market_cap: signal.marketCapUsd,
           liquidity: signal.liquidityUsd,
           holder_count: signal.holders,
-          volume: signal.volume24h,
+          volume: signal.volume5m ?? signal.volume24h ?? 0,
+          // Server sends buys/sells separately; compute swaps so trending_min_swaps works
+          swaps: (signal.trending.buys ?? 0) + (signal.trending.sells ?? 0),
           source: signal.sources?.find(s => s.includes('trending')) || 'server',
           seenAt: now(),
           ...signal.trending,

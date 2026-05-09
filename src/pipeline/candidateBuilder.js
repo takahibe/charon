@@ -65,8 +65,8 @@ export function filterCandidate(candidate) {
     failures.push(`GMGN total fees: ${totalFees} < ${strat.min_gmgn_total_fee_sol}`);
   }
 
-  // Graduated volume
-  if (strat.min_graduated_volume_usd > 0 && gradVolume < strat.min_graduated_volume_usd) {
+  // Graduated volume — only enforce when the token actually has graduated data
+  if (strat.min_graduated_volume_usd > 0 && candidate.graduation && gradVolume < strat.min_graduated_volume_usd) {
     failures.push(`graduated volume: ${gradVolume} < ${strat.min_graduated_volume_usd}`);
   }
 
