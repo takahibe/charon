@@ -2,6 +2,10 @@
 
 Charon is a Telegram trench agent for screening noisy Pump-token flow with overlap signals, strategy gates, LLM selection, and dry-run/confirm/live execution.
 
+# ALERT
+This Codebase is on testing-period, developer doesn't guarantee of any result.
+
+
 ## Flow
 
 1. Charon polls the Charon signal server every `SIGNAL_POLL_MS`.
