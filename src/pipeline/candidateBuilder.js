@@ -44,8 +44,9 @@ export function filterCandidate(candidate) {
   const bundlerRate = Number(candidate.trending?.bundler_rate ?? 0);
 
   // Meteora DBC tokens use relaxed thresholds — bonding curve launches differ from Pump.fun
+  const minMcap = isMeteoraDbc ? 1_000 : strat.min_mcap_usd;
   const maxMcap = isMeteoraDbc ? 1_000_000 : strat.max_mcap_usd;
-  const minGmgnFees = isMeteoraDbc ? 1 : strat.min_gmgn_total_fee_sol;
+  const minGmgnFees = isMeteoraDbc ? 0 : strat.min_gmgn_total_fee_sol;
   const maxRugRatio = isMeteoraDbc ? 0.4 : strat.trending_max_rug_ratio;
 
   // Fee claim check — Meteora DBC tokens don't have Pump.fun fee claims
@@ -59,8 +60,8 @@ export function filterCandidate(candidate) {
   }
 
   // Market cap checks
-  if (strat.min_mcap_usd > 0 && (!Number.isFinite(mcap) || mcap < strat.min_mcap_usd)) {
-    failures.push(`market cap min: ${mcap} < ${strat.min_mcap_usd}`);
+  if (minMcap > 0 && (!Number.isFinite(mcap) || mcap < minMcap)) {
+    failures.push(`market cap min: ${mcap} < ${minMcap}`);
   }
   if (maxMcap > 0 && Number.isFinite(mcap) && mcap > maxMcap) {
     failures.push(`market cap max: ${mcap} > ${maxMcap}`);
