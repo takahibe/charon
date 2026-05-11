@@ -29,6 +29,7 @@ export function signalLabel(signals = {}) {
 
 export function filterCandidate(candidate) {
   const strat = activeStrategy();
+  const isMeteoraDbc = candidate.signals?.route === 'meteora_dbc';
   const failures = [];
   const mcap = candidate.metrics.marketCapUsd;
   const totalFees = candidate.metrics.gmgnTotalFeesSol;
@@ -42,13 +43,18 @@ export function filterCandidate(candidate) {
   const rugRatio = Number(candidate.trending?.rug_ratio ?? 0);
   const bundlerRate = Number(candidate.trending?.bundler_rate ?? 0);
 
-  // Fee claim check
+  // Meteora DBC tokens use relaxed thresholds — bonding curve launches differ from Pump.fun
+  const maxMcap = isMeteoraDbc ? 1_000_000 : strat.max_mcap_usd;
+  const minGmgnFees = isMeteoraDbc ? 1 : strat.min_gmgn_total_fee_sol;
+  const maxRugRatio = isMeteoraDbc ? 0.4 : strat.trending_max_rug_ratio;
+
+  // Fee claim check — Meteora DBC tokens don't have Pump.fun fee claims
   if (candidate.feeClaim) {
     const minFee = strat.min_fee_claim_sol ?? 0.5;
     if (minFee > 0 && feeSol < minFee) {
       failures.push(`fee claim: ${feeSol} SOL < min ${minFee} SOL`);
     }
-  } else if (strat.require_fee_claim) {
+  } else if (strat.require_fee_claim && !isMeteoraDbc) {
     failures.push('fee claim: missing (required by strategy)');
   }
 
@@ -56,13 +62,13 @@ export function filterCandidate(candidate) {
   if (strat.min_mcap_usd > 0 && (!Number.isFinite(mcap) || mcap < strat.min_mcap_usd)) {
     failures.push(`market cap min: ${mcap} < ${strat.min_mcap_usd}`);
   }
-  if (strat.max_mcap_usd > 0 && Number.isFinite(mcap) && mcap > strat.max_mcap_usd) {
-    failures.push(`market cap max: ${mcap} > ${strat.max_mcap_usd}`);
+  if (maxMcap > 0 && Number.isFinite(mcap) && mcap > maxMcap) {
+    failures.push(`market cap max: ${mcap} > ${maxMcap}`);
   }
 
   // GMGN fees — only enforce when GMGN data is available; Jupiter has no equivalent
-  if (strat.min_gmgn_total_fee_sol > 0 && candidate.gmgn !== null && totalFees < strat.min_gmgn_total_fee_sol) {
-    failures.push(`GMGN total fees: ${totalFees} < ${strat.min_gmgn_total_fee_sol}`);
+  if (minGmgnFees > 0 && candidate.gmgn !== null && totalFees < minGmgnFees) {
+    failures.push(`GMGN total fees: ${totalFees} < ${minGmgnFees}`);
   }
 
   // Graduated volume — only enforce when the token actually has graduated data
@@ -101,8 +107,8 @@ export function filterCandidate(candidate) {
     if (strat.trending_min_swaps > 0 && trendingSwaps < strat.trending_min_swaps) {
       failures.push(`trending swaps: ${trendingSwaps} < ${strat.trending_min_swaps}`);
     }
-    if (strat.trending_max_rug_ratio > 0 && Number.isFinite(rugRatio) && rugRatio > strat.trending_max_rug_ratio) {
-      failures.push(`trending rug ratio: ${rugRatio} > ${strat.trending_max_rug_ratio}`);
+    if (strat.trending_max_rug_ratio > 0 && Number.isFinite(rugRatio) && rugRatio > maxRugRatio) {
+      failures.push(`trending rug ratio: ${rugRatio} > ${maxRugRatio}`);
     }
     if (strat.trending_max_bundler_rate > 0 && Number.isFinite(bundlerRate) && bundlerRate > strat.trending_max_bundler_rate) {
       failures.push(`trending bundler rate: ${bundlerRate} > ${strat.trending_max_bundler_rate}`);
