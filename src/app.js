@@ -1,5 +1,5 @@
 import { setDefaultResultOrder } from 'node:dns';
-import { APP_NAME, SIGNAL_SERVER_URL, SIGNAL_POLL_MS, GRADUATED_POLL_MS, TRENDING_POLL_MS, POSITION_CHECK_MS, validateConfig } from './config.js';
+import { APP_NAME, SIGNAL_SERVER_URL, SIGNAL_POLL_MS, GRADUATED_POLL_MS, TRENDING_POLL_MS, POSITION_CHECK_MS, ENABLE_METEORA_DBC, validateConfig } from './config.js';
 import { initDb } from './db/connection.js';
 import { initLiveExecution } from './liveExecutor.js';
 import { setupTelegram } from './telegram/commands.js';
@@ -55,6 +55,14 @@ export async function startCharon() {
     startWebsocket();
 
     console.log(`[bot] ${APP_NAME} started (standalone mode)`);
+  }
+
+  // Meteora DBC — runs in both server mode and standalone mode
+  if (ENABLE_METEORA_DBC) {
+    const { startMeteoraDbcWebsocket, setMeteoraCandidateHandler } = await import('./signals/meteoraDbc.js');
+    setMeteoraCandidateHandler(processCandidateFromSignals);
+    startMeteoraDbcWebsocket();
+    console.log('[bot] Meteora DBC signal source enabled');
   }
 
   // Position monitoring runs in both modes

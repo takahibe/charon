@@ -39,6 +39,10 @@ export const SIGNAL_SERVER_URL = process.env.SIGNAL_SERVER_URL || 'http://localh
 export const SIGNAL_SERVER_KEY = process.env.SIGNAL_SERVER_KEY || '';
 export const SIGNAL_POLL_MS = Number(process.env.SIGNAL_POLL_MS || 30_000);
 
+export const METEORA_DBC_PROGRAM = 'dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN';
+export const ENABLE_METEORA_DBC = process.env.ENABLE_METEORA_DBC !== 'false';
+export const METEORA_DBC_POLL_MS = Number(process.env.METEORA_DBC_POLL_MS || 10_000);
+
 export const JSON_HEADERS = {
   Accept: 'application/json, text/plain, */*',
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
