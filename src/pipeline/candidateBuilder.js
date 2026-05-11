@@ -59,9 +59,11 @@ export function filterCandidate(candidate) {
     failures.push('fee claim: missing (required by strategy)');
   }
 
-  // Market cap checks
+  // Market cap checks — skip min check if mcap data is unavailable for Meteora DBC
   if (minMcap > 0 && (!Number.isFinite(mcap) || mcap < minMcap)) {
-    failures.push(`market cap min: ${mcap} < ${minMcap}`);
+    if (!(isMeteoraDbc && !Number.isFinite(mcap))) {
+      failures.push(`market cap min: ${mcap} < ${minMcap}`);
+    }
   }
   if (maxMcap > 0 && Number.isFinite(mcap) && mcap > maxMcap) {
     failures.push(`market cap max: ${mcap} > ${maxMcap}`);
