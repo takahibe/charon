@@ -2,5 +2,10 @@
 .env.*
 !.env.example
 node_modules/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.log
 .DS_Store
 npm-debug.log*
