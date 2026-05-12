@@ -72,6 +72,14 @@ export async function startCharon() {
     console.log('[bot] Meteora DBC signal source enabled');
   }
 
+  // Meteora DBC — runs in both server mode and standalone mode
+  if (ENABLE_METEORA_DBC) {
+    const { startMeteoraDbcWebsocket, setMeteoraCandidateHandler } = await import('./signals/meteoraDbc.js');
+    setMeteoraCandidateHandler(processCandidateFromSignals);
+    startMeteoraDbcWebsocket();
+    console.log('[bot] Meteora DBC signal source enabled');
+  }
+
   // Position monitoring runs in both modes
   const trackPositions = makeFailureTracker('position monitor', (msg) => sendTelegram(msg));
   setInterval(() => trackPositions(() => monitorPositions()), POSITION_CHECK_MS);
