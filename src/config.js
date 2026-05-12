@@ -40,7 +40,9 @@ export const SIGNAL_SERVER_KEY = process.env.SIGNAL_SERVER_KEY || '';
 export const SIGNAL_POLL_MS = Number(process.env.SIGNAL_POLL_MS || 30_000);
 
 export const METEORA_DBC_PROGRAM = 'dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN';
-export const ENABLE_METEORA_DBC = process.env.ENABLE_METEORA_DBC !== 'false';
+// LAUNCHPAD: 'pump' = Pump.fun only, 'meteora_dbc' = Meteora DBC only, 'both' = both sources
+export const LAUNCHPAD = (process.env.LAUNCHPAD || 'pump').toLowerCase();
+export const ENABLE_METEORA_DBC = LAUNCHPAD === 'meteora_dbc' || LAUNCHPAD === 'both';
 export const METEORA_DBC_POLL_MS = Number(process.env.METEORA_DBC_POLL_MS || 10_000);
 
 export const JSON_HEADERS = {
