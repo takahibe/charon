@@ -1,0 +1,7 @@
+{
+  "ingested_at": "2026-05-13T17:45:48.711601+02:00",
+  "source": "setup_note",
+  "url": "",
+  "title": "pipeline smoke test",
+  "text": "Smoke test: extract smart-wallet, GMGN, Axiom, Nova, and Pump.fun trench tactics into Charon rules."
+}
