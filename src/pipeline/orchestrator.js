@@ -87,7 +87,7 @@ export async function processCandidateFromSignals(signals) {
 
   if (batchId) await sendBatchReveal(batchId, rows, batchDecision, candidateId);
 
-  if (selectedRow && boolSetting('agent_enabled', true) && batchDecision.verdict === 'BUY' && batchDecision.confidence >= numSetting('llm_min_confidence', 75)) {
+  if (selectedRow && boolSetting('agent_enabled', true) && batchDecision.verdict === 'BUY' && batchDecision.confidence >= (strat.llm_min_confidence ?? numSetting('llm_min_confidence', 75))) {
     if (!canOpenMorePositions()) {
       const max = numSetting('max_open_positions', 3);
       console.log(`[agent] max open positions reached (${openPositionCount()}/${max}), skipping buy ${selectedRow.candidate.token.mint}`);
@@ -113,7 +113,7 @@ export async function processCandidateFromSignals(signals) {
       action: selectedRow ? 'entry_not_approved' : 'no_candidate_selected',
       guardrails: {
         agentEnabled: boolSetting('agent_enabled', true),
-        confidenceThreshold: numSetting('llm_min_confidence', 75),
+        confidenceThreshold: strat.llm_min_confidence ?? numSetting('llm_min_confidence', 75),
         openPositions: openPositionCount(),
         maxOpenPositions: numSetting('max_open_positions', 3),
       },

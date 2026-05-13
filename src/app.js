@@ -7,6 +7,7 @@ import { monitorPositions } from './execution/positions.js';
 import { processCandidateFromSignals, maybeProcessDegenCandidate } from './pipeline/orchestrator.js';
 import { sendTelegram } from './telegram/send.js';
 import { makeFailureTracker } from './utils.js';
+import { pollGmgnSmartMoney } from './signals/gmgnSmartMoney.js';
 
 setDefaultResultOrder('ipv4first');
 validateConfig();
@@ -31,7 +32,9 @@ export async function startCharon() {
       const trackServer = makeFailureTracker('server signals', alert);
       const trackDip = makeFailureTracker('dip monitor', alert);
 
-      await fetchServerSignals().catch(error => console.log(`[server] initial fetch failed: ${error.message}`));
+      // Do not await the initial fetch: candidate processing can invoke slow LLM calls.
+      // Startup must continue so smart-money and position monitors are not blocked.
+      fetchServerSignals().catch(error => console.log(`[server] initial fetch failed: ${error.message}`));
       setInterval(() => trackServer(() => fetchServerSignals()), SIGNAL_POLL_MS);
 
       // Price monitor for dip buy strategy
@@ -72,13 +75,10 @@ export async function startCharon() {
     console.log('[bot] Meteora DBC signal source enabled');
   }
 
-  // Meteora DBC — runs in both server mode and standalone mode
-  if (ENABLE_METEORA_DBC) {
-    const { startMeteoraDbcWebsocket, setMeteoraCandidateHandler } = await import('./signals/meteoraDbc.js');
-    setMeteoraCandidateHandler(processCandidateFromSignals);
-    startMeteoraDbcWebsocket();
-    console.log('[bot] Meteora DBC signal source enabled');
-  }
+  // GMGN Smart Money flow monitor runs in both modes; it stores wallet-flow alpha for scoring.
+  const trackSmartMoney = makeFailureTracker('gmgn smartmoney', (msg) => sendTelegram(msg));
+  await pollGmgnSmartMoney().catch(error => console.log(`[smartmoney] initial poll failed: ${error.message}`));
+  setInterval(() => trackSmartMoney(() => pollGmgnSmartMoney()), 60_000);
 
   // Position monitoring runs in both modes
   const trackPositions = makeFailureTracker('position monitor', (msg) => sendTelegram(msg));

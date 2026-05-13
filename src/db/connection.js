@@ -3,6 +3,12 @@ import { DB_PATH } from '../config.js';
 
 export const db = new Database(DB_PATH);
 
+function envSetting(key, fallback) {
+  const raw = process.env[key];
+  if (raw == null) return fallback;
+  return String(raw).replace(/\s+#.*$/, '').trim();
+}
+
 export function initDb() {
   db.pragma('journal_mode = WAL');
   db.exec(`
@@ -153,6 +159,19 @@ export function initDb() {
       source TEXT NOT NULL,
       payload_json TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS smartmoney_trades (
+      tx_hash TEXT PRIMARY KEY,
+      mint TEXT NOT NULL,
+      maker TEXT NOT NULL,
+      side TEXT NOT NULL,
+      at_ms INTEGER NOT NULL,
+      amount_usd REAL,
+      quote_amount REAL,
+      price_usd REAL,
+      is_open_or_close INTEGER,
+      tags_json TEXT NOT NULL,
+      payload_json TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS learning_runs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       created_at_ms INTEGER NOT NULL,
@@ -197,6 +216,8 @@ export function initDb() {
     CREATE INDEX IF NOT EXISTS idx_trade_intents_status ON trade_intents(status);
     CREATE INDEX IF NOT EXISTS idx_decision_logs_mint ON decision_logs(selected_mint);
     CREATE INDEX IF NOT EXISTS idx_signal_events_mint ON signal_events(mint);
+    CREATE INDEX IF NOT EXISTS idx_smartmoney_trades_mint_at ON smartmoney_trades(mint, at_ms);
+    CREATE INDEX IF NOT EXISTS idx_smartmoney_trades_maker_at ON smartmoney_trades(maker, at_ms);
     CREATE INDEX IF NOT EXISTS idx_learning_lessons_status ON learning_lessons(status, created_at_ms);
   `);
   ensureColumn('candidates', 'signal_key', 'TEXT');
@@ -211,35 +232,35 @@ export function initDb() {
 
   const defaults = {
     agent_enabled: 'true',
-    trading_mode: process.env.TRADING_MODE || 'dry_run',
-    llm_candidate_pick_count: process.env.LLM_CANDIDATE_PICK_COUNT || '10',
-    llm_candidate_max_age_ms: process.env.LLM_CANDIDATE_MAX_AGE_MS || String(10 * 60 * 1000),
+    trading_mode: envSetting('TRADING_MODE', 'dry_run'),
+    llm_candidate_pick_count: envSetting('LLM_CANDIDATE_PICK_COUNT', '10'),
+    llm_candidate_max_age_ms: envSetting('LLM_CANDIDATE_MAX_AGE_MS', String(10 * 60 * 1000)),
     llm_min_confidence: '75',
-    max_open_positions: process.env.MAX_OPEN_POSITIONS || '3',
+    max_open_positions: envSetting('MAX_OPEN_POSITIONS', '3'),
     dry_run_buy_sol: '0.1',
     default_tp_percent: '50',
     default_sl_percent: '-25',
     default_trailing_enabled: 'true',
     default_trailing_percent: '20',
-    min_fee_claim_sol: process.env.MIN_FEE_CLAIM_SOL || '2',
+    min_fee_claim_sol: envSetting('MIN_FEE_CLAIM_SOL', '2'),
     min_mcap_usd: '0',
     max_mcap_usd: '0',
     min_gmgn_total_fee_sol: '0',
     min_graduated_volume_usd: '0',
     max_top20_holder_percent: '100',
     min_saved_wallet_holders: '0',
-    gmgn_request_delay_ms: process.env.GMGN_REQUEST_DELAY_MS || '2500',
-    gmgn_max_retries: process.env.GMGN_MAX_RETRIES || '2',
-    trending_enabled: process.env.TRENDING_ENABLED || 'true',
-    trending_source: process.env.TRENDING_SOURCE || 'jupiter',
-    trending_allow_degen: process.env.TRENDING_ALLOW_DEGEN || 'false',
-    trending_interval: process.env.TRENDING_INTERVAL || '5m',
-    trending_limit: process.env.TRENDING_LIMIT || '100',
-    trending_order_by: process.env.TRENDING_ORDER_BY || 'volume',
-    trending_min_volume_usd: process.env.TRENDING_MIN_VOLUME_USD || '0',
-    trending_min_swaps: process.env.TRENDING_MIN_SWAPS || '0',
-    trending_max_rug_ratio: process.env.TRENDING_MAX_RUG_RATIO || '0.3',
-    trending_max_bundler_rate: process.env.TRENDING_MAX_BUNDLER_RATE || '0.5',
+    gmgn_request_delay_ms: envSetting('GMGN_REQUEST_DELAY_MS', '2500'),
+    gmgn_max_retries: envSetting('GMGN_MAX_RETRIES', '2'),
+    trending_enabled: envSetting('TRENDING_ENABLED', 'true'),
+    trending_source: envSetting('TRENDING_SOURCE', 'jupiter'),
+    trending_allow_degen: envSetting('TRENDING_ALLOW_DEGEN', 'false'),
+    trending_interval: envSetting('TRENDING_INTERVAL', '5m'),
+    trending_limit: envSetting('TRENDING_LIMIT', '100'),
+    trending_order_by: envSetting('TRENDING_ORDER_BY', 'volume'),
+    trending_min_volume_usd: envSetting('TRENDING_MIN_VOLUME_USD', '0'),
+    trending_min_swaps: envSetting('TRENDING_MIN_SWAPS', '0'),
+    trending_max_rug_ratio: envSetting('TRENDING_MAX_RUG_RATIO', '0.3'),
+    trending_max_bundler_rate: envSetting('TRENDING_MAX_BUNDLER_RATE', '0.5'),
   };
   const insert = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
   for (const [key, value] of Object.entries(defaults)) insert.run(key, value);

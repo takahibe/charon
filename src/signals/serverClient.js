@@ -33,8 +33,10 @@ async function triggerCandidate({ mint, fee, signature, graduatedCoin, trendingT
 export async function fetchServerSignals() {
   try {
     const url = new URL('/api/signals', SIGNAL_SERVER_URL);
+    const strat = activeStrategy();
+    const minSources = Math.max(1, Math.min(4, Number(strat.min_source_count || 1)));
     url.searchParams.set('limit', '100');
-    url.searchParams.set('minSources', '2');
+    url.searchParams.set('minSources', String(minSources));
 
     const res = await axios.get(url.toString(), {
       timeout: 10_000,
@@ -44,7 +46,6 @@ export async function fetchServerSignals() {
 
     prune(seenSignals, 10 * 60_000);
 
-    const strat = activeStrategy();
     let processed = 0;
     let triggered = 0;
     let dipAlerts = 0;

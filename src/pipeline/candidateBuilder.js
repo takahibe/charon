@@ -5,6 +5,7 @@ import { fetchJupiterAsset, fetchJupiterHolders, fetchJupiterChartContext } from
 import { fetchSavedWalletExposure } from '../enrichment/wallets.js';
 import { fetchTwitterNarrative } from '../enrichment/twitter.js';
 import { gmgnLink } from '../format.js';
+import { smartMoneyCluster } from '../signals/gmgnSmartMoney.js';
 
 export function buildFeeSnapshot(fee, signature) {
   return {
@@ -132,6 +133,7 @@ export async function buildCandidate({ mint, fee = null, signature = null, gradu
   const chart = await fetchJupiterChartContext(mint);
   const savedWalletExposure = await fetchSavedWalletExposure(mint, holders);
   const twitterNarrative = await fetchTwitterNarrative(graduatedCoin || jupiterAsset, gmgn);
+  const smartMoney = smartMoneyCluster(mint);
   const priceUsd = firstPositiveNumber(tokenPriceFromGmgn(gmgn), jupiterAsset?.usdPrice, trendingToken?.price);
   const marketCapUsd = firstPositiveNumber(
     marketCapFromGmgn(gmgn),
@@ -170,6 +172,9 @@ export async function buildCandidate({ mint, fee = null, signature = null, gradu
       trendingSwaps: Number(trendingToken?.swaps ?? 0),
       trendingHotLevel: Number(trendingToken?.hot_level ?? 0),
       trendingSmartDegenCount: Number(trendingToken?.smart_degen_count ?? 0),
+      smartMoneyUniqueBuyers5m: smartMoney.uniqueBuyers,
+      smartMoneyNetUsd5m: smartMoney.netUsd,
+      smartMoneyBuyPressure5m: smartMoney.buyPressure,
     },
     signals: {
       route: signalRoute,
@@ -192,6 +197,7 @@ export async function buildCandidate({ mint, fee = null, signature = null, gradu
     holders,
     chart,
     savedWalletExposure,
+    smartMoney,
     twitterNarrative,
     createdAtMs: now(),
   };
