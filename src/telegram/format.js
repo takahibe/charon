@@ -96,23 +96,105 @@ export function batchRevealSummary(batchId, rows, decision, triggerCandidateId =
   return lines.filter(Boolean).join('\n');
 }
 
+export function positionPnlPercent(position) {
+  if (position.pnl_percent != null) return Number(position.pnl_percent);
+  if (position.entry_mcap && position.high_water_mcap) {
+    return (Number(position.high_water_mcap) / Number(position.entry_mcap) - 1) * 100;
+  }
+  if (position.entry_price && position.high_water_price) {
+    return (Number(position.high_water_price) / Number(position.entry_price) - 1) * 100;
+  }
+  return 0;
+}
+
+export function positionPnlSol(position) {
+  if (position.pnl_sol != null) return Number(position.pnl_sol);
+  return Number(position.size_sol || 0) * positionPnlPercent(position) / 100;
+}
+
+function pnlEmoji(pnl) {
+  if (pnl > 0) return '🟢📈';
+  if (pnl < 0) return '🔴📉';
+  return '🟡➖';
+}
+
+function signedPct(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '?';
+  return `${n >= 0 ? '+' : ''}${fmtPct(n)}`;
+}
+
+function signedSol(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '?';
+  return `${n >= 0 ? '+' : ''}${fmtSol(n)} SOL`;
+}
+
 export function formatPosition(position) {
-  const pnl = position.pnl_percent != null
-    ? Number(position.pnl_percent)
-    : position.entry_mcap && position.high_water_mcap
-      ? (Number(position.high_water_mcap) / Number(position.entry_mcap) - 1) * 100
-      : 0;
+  const pnl = positionPnlPercent(position);
+  const pnlSol = positionPnlSol(position);
+  const statusEmoji = position.status === 'open' ? '🟢' : '🏁';
   return [
-    `📍 <b>${escapeHtml(position.symbol || short(position.mint))}</b> #${position.id}`,
+    `${statusEmoji} <b>${escapeHtml(position.symbol || short(position.mint))}</b> #${position.id}`,
     `Token: <a href="${gmgnLink(position.mint)}">${short(position.mint)}</a>`,
     `Status: <b>${escapeHtml(position.status)}</b> · Mode: <b>${escapeHtml(position.execution_mode || 'dry_run')}</b> · Strategy: <b>${escapeHtml(position.strategy_id || 'sniper')}</b>`,
     position.entry_signature ? `Entry TX: <a href="${txLink(position.entry_signature)}">${short(position.entry_signature)}</a>` : null,
     `Entry mcap: ${fmtUsd(position.entry_mcap)} · High: ${fmtUsd(position.high_water_mcap)}`,
-    `Size: ${fmtSol(position.size_sol)} SOL · PnL: ${fmtPct(pnl)}`,
+    `Size: ${fmtSol(position.size_sol)} SOL · PnL: <b>${signedPct(pnl)}</b> / ${signedSol(pnlSol)}`,
     `TP: ${fmtPct(position.tp_percent)} · SL: ${fmtPct(position.sl_percent)} · Trail: ${position.trailing_enabled ? `${fmtPct(position.trailing_percent)}` : 'off'}`,
-    position.exit_reason ? `Exit: ${escapeHtml(position.exit_reason)} at ${fmtUsd(position.exit_mcap)} (${fmtPct(position.pnl_percent)})` : null,
+    position.exit_reason ? `Exit: ${escapeHtml(position.exit_reason)} at ${fmtUsd(position.exit_mcap)} (${signedPct(position.pnl_percent)})` : null,
     position.exit_signature ? `Exit TX: <a href="${txLink(position.exit_signature)}">${short(position.exit_signature)}</a>` : null,
   ].filter(Boolean).join('\n');
+}
+
+export function compactOpenPositionLine(position, index = null) {
+  const pnl = positionPnlPercent(position);
+  const pnlSol = positionPnlSol(position);
+  const prefix = index == null ? '•' : `${index}.`;
+  const label = position.symbol || short(position.mint);
+  return [
+    `${prefix} ${pnlEmoji(pnl)} <b>${escapeHtml(label)}</b> #${position.id}`,
+    `   PnL: <b>${signedPct(pnl)}</b> / ${signedSol(pnlSol)} · Size: ${fmtSol(position.size_sol)} SOL`,
+    `   Entry: ${fmtUsd(position.entry_mcap)} · High: ${fmtUsd(position.high_water_mcap)} · <a href="${gmgnLink(position.mint)}">GMGN</a>`,
+  ].join('\n');
+}
+
+export function compactClosedPositionLine(position, index = null) {
+  const pnl = positionPnlPercent(position);
+  const pnlSol = positionPnlSol(position);
+  const prefix = index == null ? '•' : `${index}.`;
+  const label = position.symbol || short(position.mint);
+  const reason = position.exit_reason || 'closed';
+  return [
+    `${prefix} ${pnlEmoji(pnl)} <b>${escapeHtml(label)}</b> #${position.id}`,
+    `   Realized: <b>${signedPct(pnl)}</b> / ${signedSol(pnlSol)} · ${escapeHtml(reason)}`,
+    `   Entry: ${fmtUsd(position.entry_mcap)} · Exit: ${fmtUsd(position.exit_mcap)} · <a href="${gmgnLink(position.mint)}">GMGN</a>`,
+  ].join('\n');
+}
+
+export function formatPositionsReport(openRows = [], closedRows = []) {
+  const openPct = openRows.reduce((sum, row) => sum + positionPnlPercent(row), 0);
+  const openSol = openRows.reduce((sum, row) => sum + positionPnlSol(row), 0);
+  const closedPct = closedRows.reduce((sum, row) => sum + positionPnlPercent(row), 0);
+  const closedSol = closedRows.reduce((sum, row) => sum + positionPnlSol(row), 0);
+  const openText = openRows.length
+    ? openRows.map((row, index) => compactOpenPositionLine(row, index + 1)).join('\n\n')
+    : 'No active open positions.';
+  const closedText = closedRows.length
+    ? closedRows.map((row, index) => compactClosedPositionLine(row, index + 1)).join('\n\n')
+    : 'No closed positions yet.';
+
+  return [
+    '📍 <b>Charon Positions</b>',
+    '',
+    `🟢 <b>Active Open Positions</b> (${openRows.length})`,
+    `Floating PnL: <b>${signedPct(openPct)}</b> / ${signedSol(openSol)}`,
+    openText,
+    '',
+    `🏁 <b>Recent Closed Positions</b> (${closedRows.length}/5)`,
+    `Realized PnL shown below: <b>${signedPct(closedPct)}</b> / ${signedSol(closedSol)}`,
+    closedText,
+  ].join('\n');
 }
 
 export function compactDecisionCandidate(row) {

@@ -22,7 +22,7 @@ import {
   strategyKeyboard,
 } from './menus.js';
 import { sendTelegram, sendBatch, sendPositionOpen } from './send.js';
-import { candidateSummary, formatPosition } from './format.js';
+import { candidateSummary, formatPosition, formatPositionsReport } from './format.js';
 import { refreshPosition } from '../execution/positions.js';
 import { executeLiveSell } from '../execution/router.js';
 import { handleCallback, editMenuMessage } from './callbacks.js';
@@ -155,9 +155,9 @@ export async function sendCandidate(chatId, id) {
 }
 
 export async function sendPositions(chatId) {
-  const rows = allPositions(12);
-  const text = rows.length ? rows.map(formatPosition).join('\n\n') : 'No dry-run positions yet.';
-  await bot.sendMessage(chatId, `📍 <b>Positions</b>\n\n${text}`, { parse_mode: 'HTML', disable_web_page_preview: true });
+  const openRows = openPositionsForReport();
+  const closedRows = recentClosedPositions(5);
+  await bot.sendMessage(chatId, formatPositionsReport(openRows, closedRows), { parse_mode: 'HTML', disable_web_page_preview: true });
 }
 
 export async function sendPosition(chatId, id, query = null) {
@@ -296,8 +296,23 @@ function parseSetFilter(text) {
   return { key: parts[1], value: parts[2] };
 }
 
-function allPositions(limit = 10) {
-  return db.prepare('SELECT * FROM dry_run_positions ORDER BY id DESC LIMIT ?').all(limit);
+function openPositionsForReport() {
+  return db.prepare(`
+    SELECT *
+    FROM dry_run_positions
+    WHERE status = 'open'
+    ORDER BY opened_at_ms DESC, id DESC
+  `).all();
+}
+
+function recentClosedPositions(limit = 5) {
+  return db.prepare(`
+    SELECT *
+    FROM dry_run_positions
+    WHERE status = 'closed'
+    ORDER BY COALESCE(closed_at_ms, opened_at_ms) DESC, id DESC
+    LIMIT ?
+  `).all(limit);
 }
 
 function savedWallets() {
