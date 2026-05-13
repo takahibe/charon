@@ -18,7 +18,12 @@ function candidate(overrides = {}) {
     holders: { maxHolderPercent: 12, ...(overrides.holders || {}) },
     trending: { bundler_rate: 0.1, rug_ratio: 0.1, is_wash_trading: false, ...(overrides.trending || {}) },
     smartMoney: { rows: [], ...(overrides.smartMoney || {}) },
-    signals: overrides.signals || {},
+    signals: {
+      route: 'graduated_trending',
+      hasGraduated: true,
+      hasTrending: true,
+      ...(overrides.signals || {}),
+    },
   };
 }
 
@@ -52,4 +57,16 @@ test('trench risk can boost smart-money pressure without bypassing hard failures
   assert.equal(result.failures.length, 0);
   assert.ok(result.score > 0);
   assert.match(result.boosts.join('\n'), /smart-money pressure/);
+});
+
+test('trench risk blocks bad routes and enforces multi-source entries', () => {
+  const result = assessTrenchRisk(candidate({
+    signals: { route: 'fee_trending', hasFeeClaim: true, hasGraduated: false, hasTrending: true },
+  }), {
+    trench_v11_enabled: true,
+    trench_blocked_routes: ['fee_trending'],
+    min_source_count: 3,
+  });
+  assert.match(result.failures.join('\n'), /route blocked/);
+  assert.match(result.failures.join('\n'), /source count/);
 });

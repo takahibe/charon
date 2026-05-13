@@ -125,6 +125,9 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
   }
   const tpHit = pnlPercent >= Number(position.tp_percent);
   const slHit = pnlPercent <= Number(position.sl_percent);
+  const strat = strategyById(position.strategy_id);
+  const emergencySlPercent = Number(strat?.trench_emergency_sl_percent ?? numSetting('trench_emergency_sl_percent', -30));
+  const emergencySlHit = Number.isFinite(emergencySlPercent) && pnlPercent <= emergencySlPercent;
   const trailingArmed = position.trailing_armed || (position.trailing_enabled && tpHit);
   const trailDrop = highWaterMcap > 0 ? (Number(mcap) / highWaterMcap - 1) * 100 : 0;
   const trailingHit = trailingArmed && position.trailing_enabled && trailDrop <= -Math.abs(Number(position.trailing_percent));
@@ -132,8 +135,10 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
   let closed = false;
 
   // Max hold time check
-  const strat = strategyById(position.strategy_id);
-  if (strat?.max_hold_ms > 0 && (now() - position.opened_at_ms) >= strat.max_hold_ms) {
+  const configuredMaxHoldMs = Number(strat?.max_hold_ms ?? 0);
+  const staleMaxHoldMs = Number(numSetting('stale_position_max_hold_ms', 6 * 60 * 60 * 1000));
+  const maxHoldMs = configuredMaxHoldMs > 0 ? configuredMaxHoldMs : staleMaxHoldMs;
+  if (maxHoldMs > 0 && (now() - position.opened_at_ms) >= maxHoldMs) {
     exitReason = 'MAX_HOLD';
   }
 
@@ -179,7 +184,8 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
 
   // Standard exit checks
   if (!exitReason) {
-    if (slHit) exitReason = 'SL';
+    if (emergencySlHit) exitReason = 'EMERGENCY_SL';
+    else if (slHit) exitReason = 'SL';
     else if (tpHit && !position.trailing_enabled) exitReason = 'TP';
     else if (trailingHit) exitReason = 'TRAILING_TP';
   }
@@ -225,11 +231,11 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
       UPDATE dry_run_positions
       SET status = 'closed', closed_at_ms = ?, exit_price = ?, exit_mcap = ?, exit_reason = ?, pnl_percent = ?, pnl_sol = ?
       WHERE id = ?
-    `).run(now(), price, mcap, exitReason, pnlPercent, pnlSol, position.id);
+    `).run(now(), price, mcap, exitReason, finalPnlPercent, finalPnlSol, position.id);
     db.prepare(`
       INSERT INTO dry_run_trades (position_id, mint, side, at_ms, price, mcap, size_sol, token_amount_est, reason, payload_json)
       VALUES (?, ?, 'sell', ?, ?, ?, ?, ?, ?, ?)
-    `).run(position.id, position.mint, now(), price, mcap, position.size_sol, position.token_amount_est, exitReason, json({ pnlPercent, pnlSol }));
+    `).run(position.id, position.mint, now(), price, mcap, position.size_sol, position.token_amount_est, exitReason, json({ pnlPercent: finalPnlPercent, pnlSol: finalPnlSol }));
     closed = true;
   }
   return {

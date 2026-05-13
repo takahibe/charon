@@ -26,6 +26,14 @@ function utcHour(ts = Date.now()) {
   return new Date(ts).getUTCHours();
 }
 
+function list(value, fallback = []) {
+  if (Array.isArray(value)) return value.map(String).filter(Boolean);
+  if (typeof value === 'string') {
+    return value.split(',').map(item => item.trim()).filter(Boolean);
+  }
+  return fallback;
+}
+
 function tokenAgeMs(candidate) {
   const created = num(candidate?.createdAtMs, 0);
   const launch = num(candidate?.signals?.launchedAtMs || candidate?.signals?.createdAtMs || candidate?.trending?.created_at_ms || 0, 0);
@@ -69,6 +77,31 @@ export function assessTrenchRisk(candidate, strat = {}, settings = {}) {
   const smartBuyers = num(candidate?.metrics?.smartMoneyUniqueBuyers5m, 0);
   const smartNetUsd = num(candidate?.metrics?.smartMoneyNetUsd5m, 0);
   const buyPressure = candidate?.metrics?.smartMoneyBuyPressure5m;
+  const route = candidate?.signals?.route || 'unknown';
+  const sourceCount = [
+    candidate?.signals?.hasFeeClaim,
+    candidate?.signals?.hasGraduated,
+    candidate?.signals?.hasTrending,
+    route === 'meteora_dbc',
+  ].filter(Boolean).length;
+
+  const blockedRoutes = new Set(list(strat.trench_blocked_routes ?? settings.trench_blocked_routes, []));
+  if (blockedRoutes.has(route)) {
+    failures.push(`trench route blocked: ${route}`);
+    score -= 5;
+  }
+
+  const minSources = num(strat.min_source_count ?? settings.min_source_count, 0);
+  if (minSources > 0 && sourceCount < minSources) {
+    failures.push(`source count: ${sourceCount} < ${minSources}`);
+    score -= 3;
+  }
+
+  const preferredRoutes = new Set(list(strat.trench_preferred_routes ?? settings.trench_preferred_routes, []));
+  if (preferredRoutes.has(route)) {
+    boosts.push(`trench preferred route: ${route}`);
+    score += 1;
+  }
 
   const maxBundlerRate = num(strat.trench_max_bundler_rate ?? settings.trench_max_bundler_rate, 0.3);
   if (Number.isFinite(bundlerRate) && bundlerRate > maxBundlerRate) {

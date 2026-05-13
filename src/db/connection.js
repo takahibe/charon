@@ -253,6 +253,10 @@ export function initDb() {
     trench_min_fee_per_10k_volume_sol: envSetting('TRENCH_MIN_FEE_PER_10K_VOLUME_SOL', '0'),
     trench_min_smart_buyers_5m: envSetting('TRENCH_MIN_SMART_BUYERS_5M', '0'),
     trench_eu_sleep_hour_boost: envSetting('TRENCH_EU_SLEEP_HOUR_BOOST', 'true'),
+    trench_blocked_routes: envSetting('TRENCH_BLOCKED_ROUTES', 'fee_trending,fee_graduated_trending'),
+    trench_preferred_routes: envSetting('TRENCH_PREFERRED_ROUTES', 'dual_source,trending,graduated_trending'),
+    trench_emergency_sl_percent: envSetting('TRENCH_EMERGENCY_SL_PERCENT', '-30'),
+    stale_position_max_hold_ms: envSetting('STALE_POSITION_MAX_HOLD_MS', String(6 * 60 * 60 * 1000)),
     min_fee_claim_sol: envSetting('MIN_FEE_CLAIM_SOL', '2'),
     min_mcap_usd: '0',
     max_mcap_usd: '0',
@@ -417,6 +421,33 @@ export function initDb() {
     trench_min_fee_per_10k_volume_sol: 0,
     trench_min_smart_buyers_5m: 0,
     trench_eu_sleep_hour_boost: true,
+    trench_blocked_routes: ['fee_trending', 'fee_graduated_trending'],
+    trench_preferred_routes: ['dual_source', 'trending', 'graduated_trending'],
+    trench_emergency_sl_percent: -30,
+  });
+
+  applyStrategyOverrides('degen', {
+    min_source_count: 2,
+    tp_percent: 100,
+    sl_percent: -20,
+    trailing_enabled: true,
+    trailing_percent: 15,
+    partial_tp: true,
+    partial_tp_at_percent: 100,
+    partial_tp_sell_percent: 50,
+    max_hold_ms: 2 * 60 * 60 * 1000,
+    use_llm: true,
+    llm_min_confidence: 75,
+    trench_blocked_routes: ['fee_trending', 'fee_graduated_trending'],
+    trench_preferred_routes: ['dual_source', 'trending', 'graduated_trending'],
+    trench_emergency_sl_percent: -30,
+  });
+  applyStrategyOverrides('sniper', {
+    max_hold_ms: 6 * 60 * 60 * 1000,
+    use_llm: true,
+    llm_min_confidence: 75,
+    trench_blocked_routes: ['fee_trending', 'fee_graduated_trending'],
+    trench_emergency_sl_percent: -30,
   });
 }
 
@@ -438,6 +469,21 @@ function applyStrategyDefaults(defaults) {
       }
     }
     if (changed) update.run(JSON.stringify(config), row.id);
+  }
+}
+
+function applyStrategyOverrides(id, overrides) {
+  const row = db.prepare('SELECT config_json FROM strategies WHERE id = ?').get(id);
+  if (!row) return;
+  let config;
+  try {
+    config = JSON.parse(row.config_json);
+  } catch {
+    return;
+  }
+  const next = { ...config, ...overrides };
+  if (JSON.stringify(next) !== JSON.stringify(config)) {
+    db.prepare('UPDATE strategies SET config_json = ? WHERE id = ?').run(JSON.stringify(next), id);
   }
 }
 
