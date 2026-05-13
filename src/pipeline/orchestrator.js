@@ -9,6 +9,7 @@ import { createDryRunPosition, createLivePosition, canOpenMorePositions, openPos
 import { sendBatchReveal, sendTelegram, sendPositionOpen, sendTradeIntent } from '../telegram/send.js';
 import { candidateSummary } from '../telegram/format.js';
 import { createTradeIntent } from '../db/intents.js';
+import { db } from '../db/connection.js';
 import { refreshCandidateForExecution } from '../execution/positions.js';
 import { executeLiveBuy } from '../execution/router.js';
 import { graduated } from '../signals/graduated.js';
@@ -23,12 +24,7 @@ setDegenHandler(maybeProcessDegenCandidate);
 setCandidateHandler(processCandidateFromSignals);
 
 export async function processCandidateFromSignals(signals) {
-  // Skip if max positions reached — don't waste enrichment/LLM calls
-  if (!canOpenMorePositions()) {
-    const max = numSetting('max_open_positions', 3);
-    console.log(`[agent] max positions reached (${openPositionCount()}/${max}), skipping ${signals.mint.slice(0, 8)}...`);
-    return;
-  }
+  const positionsFull = !canOpenMorePositions();
 
   const candidate = await buildCandidate(signals);
   const signature = signals.signature || null;
@@ -88,9 +84,9 @@ export async function processCandidateFromSignals(signals) {
   if (batchId) await sendBatchReveal(batchId, rows, batchDecision, candidateId);
 
   if (selectedRow && boolSetting('agent_enabled', true) && batchDecision.verdict === 'BUY' && batchDecision.confidence >= (strat.llm_min_confidence ?? numSetting('llm_min_confidence', 75))) {
-    if (!canOpenMorePositions()) {
+    if (positionsFull) {
       const max = numSetting('max_open_positions', 3);
-      console.log(`[agent] max open positions reached (${openPositionCount()}/${max}), skipping buy ${selectedRow.candidate.token.mint}`);
+      console.log(`[agent] max positions reached (${openPositionCount()}/${max}), skipping buy ${selectedRow.candidate.token.mint}`);
       logDecisionEvent({
         batchId,
         triggerCandidateId: candidateId,
@@ -99,6 +95,22 @@ export async function processCandidateFromSignals(signals) {
         decision: batchDecision,
         action: 'entry_skipped_max_positions',
         guardrails: { maxOpenPositions: max, openPositions: openPositionCount() },
+      });
+      // Notify user so they can manually close a position to make room
+      await sendTelegram([
+        '🔔 <b>BUY signal — positions full</b>',
+        '',
+        candidateSummary(selectedRow.candidate, batchDecision),
+        '',
+        `Positions: <b>${openPositionCount()}/${max}</b> — close one to make room.`,
+        `Confidence: <b>${batchDecision.confidence}%</b>`,
+      ].join('\n'), {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '📍 Positions', callback_data: 'menu:positions' }],
+            [{ text: '🛒 Buy candidate', callback_data: `buy:${selectedRow.id}` }],
+          ],
+        },
       });
       return;
     }

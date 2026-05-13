@@ -1,12 +1,39 @@
 import { bot } from './bot.js';
 import { TELEGRAM_CHAT_ID, TELEGRAM_TOPIC_ID } from '../config.js';
 import { now, json } from '../utils.js';
-import { db } from '../db/connection.js';
 import { escapeHtml, fmtPct, fmtSol, fmtUsd, short, gmgnLink } from '../format.js';
 import { numSetting } from '../db/settings.js';
 import { candidateSummary, compactCandidateLine, batchRevealSummary, formatPosition } from './format.js';
 import { candidateButtons, batchRevealButtons, positionButtons, intentButtons } from './menus.js';
 import { batchById } from '../db/decisions.js';
+import { db } from '../db/connection.js';
+
+export function createTypingIndicator(chatId = TELEGRAM_CHAT_ID) {
+  if (!chatId) return { stop() {} };
+
+  let stopped = false;
+  let timer = null;
+
+  async function tick() {
+    if (stopped) return;
+    try {
+      await bot.sendChatAction(chatId, 'typing');
+    } catch (_) {}
+    timer = setTimeout(() => {
+      tick().catch(() => null);
+    }, 4000);
+  }
+
+  tick().catch(() => null);
+
+  return {
+    stop() {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      timer = null;
+    },
+  };
+}
 
 export async function sendTelegram(text, extra = {}) {
   return bot.sendMessage(TELEGRAM_CHAT_ID, text, {
@@ -86,4 +113,36 @@ export async function sendTradeIntent(intentId, candidate, decision) {
     `Size: <b>${fmtSol(numSetting('dry_run_buy_sol', 0.1))} SOL</b>`,
     'Execution: confirmation required before signing.',
   ].join('\n'), intentButtons(intentId));
+}
+
+export async function sendPeriodicSummary() {
+  const openRows = db.prepare(`
+    SELECT * FROM dry_run_positions WHERE status = 'open' ORDER BY opened_at_ms DESC
+  `).all();
+
+  if (!openRows.length) return; // nothing to report
+
+  const { refreshPosition } = await import('../execution/positions.js');
+
+  // Refresh prices for open positions
+  for (const row of openRows) {
+    try {
+      const refreshed = await refreshPosition(row, { autoExit: false });
+      if (refreshed) {
+        Object.assign(row, refreshed);
+      }
+    } catch (err) {
+      console.log(`[summary] refresh ${row.id} failed: ${err.message}`);
+    }
+  }
+
+  const closedRows = db.prepare(`
+    SELECT * FROM dry_run_positions WHERE status = 'closed'
+    ORDER BY COALESCE(closed_at_ms, opened_at_ms) DESC LIMIT 5
+  `).all();
+
+  const { formatPositionsReport } = await import('./format.js');
+  const report = formatPositionsReport(openRows, closedRows);
+
+  await sendTelegram(`⏰ <b>Periodic Summary</b>\n\n${report}`);
 }

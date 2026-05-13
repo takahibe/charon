@@ -1,11 +1,11 @@
 import { setDefaultResultOrder } from 'node:dns';
-import { APP_NAME, SIGNAL_SERVER_URL, SIGNAL_POLL_MS, GRADUATED_POLL_MS, TRENDING_POLL_MS, POSITION_CHECK_MS, LAUNCHPAD, ENABLE_METEORA_DBC, validateConfig } from './config.js';
+import { APP_NAME, SIGNAL_SERVER_URL, SIGNAL_POLL_MS, GRADUATED_POLL_MS, TRENDING_POLL_MS, POSITION_CHECK_MS, PERIODIC_SUMMARY_MS, LAUNCHPAD, ENABLE_METEORA_DBC, validateConfig } from './config.js';
 import { initDb } from './db/connection.js';
 import { initLiveExecution } from './liveExecutor.js';
 import { setupTelegram } from './telegram/commands.js';
 import { monitorPositions } from './execution/positions.js';
 import { processCandidateFromSignals, maybeProcessDegenCandidate } from './pipeline/orchestrator.js';
-import { sendTelegram } from './telegram/send.js';
+import { sendTelegram, sendPeriodicSummary } from './telegram/send.js';
 import { makeFailureTracker } from './utils.js';
 import { pollGmgnSmartMoney } from './signals/gmgnSmartMoney.js';
 
@@ -83,4 +83,13 @@ export async function startCharon() {
   // Position monitoring runs in both modes
   const trackPositions = makeFailureTracker('position monitor', (msg) => sendTelegram(msg));
   setInterval(() => trackPositions(() => monitorPositions()), POSITION_CHECK_MS);
+
+  // Periodic position summary
+  setInterval(() => {
+    sendPeriodicSummary().catch(err => console.log(`[summary] ${err.message}`));
+  }, PERIODIC_SUMMARY_MS);
+  // Send first summary 30s after startup
+  setTimeout(() => {
+    sendPeriodicSummary().catch(err => console.log(`[summary] startup ${err.message}`));
+  }, 30_000);
 }

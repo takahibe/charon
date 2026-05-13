@@ -3,7 +3,7 @@ import { numSetting, boolSetting, setting, activeStrategy, allStrategies } from 
 import { openPositionCount, tradingMode, allPositions } from '../db/positions.js';
 import { savedWallets } from '../enrichment/wallets.js';
 import { gmgnStatusText } from '../enrichment/gmgn.js';
-import { formatPosition } from './format.js';
+import { formatPosition, formatPositionsReport } from './format.js';
 import { ENABLE_LLM, LLM_API_KEY } from '../config.js';
 
 export function menuKeyboard() {
@@ -185,9 +185,9 @@ export function walletsText() {
 }
 
 export function positionsText() {
-  const rows = allPositions(12);
-  const text = rows.length ? rows.map(formatPosition).join('\n\n') : 'No dry-run positions yet.';
-  return `📍 <b>Positions</b>\n\n${text}`;
+  const openRows = allPositions(12).filter(r => r.status === 'open');
+  const closedRows = allPositions(12).filter(r => r.status === 'closed').slice(0, 5);
+  return formatPositionsReport(openRows, closedRows);
 }
 
 export function strategyMenuText() {
@@ -346,6 +346,19 @@ export function batchRevealButtons(batchId, rows, decision, triggerCandidateId =
   const selectedId = Number(decision.selected_candidate_id || 0);
   const triggerId = Number(triggerCandidateId || 0);
   const keyboard = [];
+
+  // Buy buttons for each candidate in the batch
+  const buyRow = [];
+  for (const row of rows.slice(0, 5)) {
+    const name = row.candidate?.token?.symbol || short(row.candidate?.token?.mint || '');
+    const isSelected = row.id === selectedId;
+    buyRow.push({
+      text: `${isSelected ? '⭐ ' : ''}Buy ${name}`,
+      callback_data: `buy:${row.id}`,
+    });
+  }
+  if (buyRow.length) keyboard.push(buyRow);
+
   if (selectedId) keyboard.push([{ text: 'Reveal Pick', callback_data: `cand:${selectedId}` }]);
   keyboard.push([{ text: 'Reveal Batch', callback_data: `batch:${batchId}` }]);
   if (triggerId && triggerId !== selectedId) keyboard.push([{ text: 'Reveal Trigger', callback_data: `cand:${triggerId}` }]);
