@@ -15,7 +15,8 @@ BATCH="/tmp/charon_trench_batch_$$.md"
 OUT="$ROOT/extracted/claims.jsonl.raw"
 
 mkdir -p "$ROOT/extracted"
-python "$ROOT/scripts/make_batch.py" --include-prompt --limit "$LIMIT" > "$BATCH"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+"$PYTHON_BIN" "$ROOT/scripts/make_batch.py" --include-prompt --limit "$LIMIT" > "$BATCH"
 
 hermes --profile "$PROFILE" chat --quiet -q "$(cat "$BATCH")" | tee -a "$OUT"
 

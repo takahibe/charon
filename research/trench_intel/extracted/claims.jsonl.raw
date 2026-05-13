@@ -1,0 +1,9 @@
+Pipeline smoke test received. No extractable intel in this input — it's a setup note, not a content source.
+
+To actually exercise the pipeline, feed it one of:
+
+1. Raw X post text (copy-paste or screenshot transcription)
+2. GMGN/Axiom/Nova observations (notes, settings, wallet data)
+3. Community posts or Telegram forwards
+
+The extractor is ready. Send real intel and I'll output JSONL claims.
