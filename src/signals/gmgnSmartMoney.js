@@ -45,6 +45,7 @@ export function smartMoneyCluster(mint, windowMs = 5 * 60_000) {
   return {
     windowMs,
     trades: rows.length,
+    rows,
     uniqueBuyers: buyers.size,
     uniqueSellers: sellers.size,
     buyUsd,

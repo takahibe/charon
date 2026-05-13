@@ -118,6 +118,7 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
   const highWaterPrice = Math.max(Number(position.high_water_price || 0), Number(price || 0));
   let pnlPercent = (Number(mcap) / Number(position.entry_mcap) - 1) * 100;
   let pnlSol = Number(position.size_sol) * pnlPercent / 100;
+  const partialRealizedSol = Number(position.partial_realized_sol || 0);
   if (jupiterPnl && Number.isFinite(Number(jupiterPnl.totalPnlPercentageNative))) {
     pnlPercent = Number(jupiterPnl.totalPnlPercentageNative);
     pnlSol = Number.isFinite(Number(jupiterPnl.totalPnlNative)) ? Number(jupiterPnl.totalPnlNative) : pnlSol;
@@ -138,8 +139,29 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
 
   // Partial TP check
   if (!exitReason && strat?.partial_tp && !position.partial_tp_done && pnlPercent >= strat.partial_tp_at_percent) {
-    db.prepare('UPDATE dry_run_positions SET partial_tp_done = 1 WHERE id = ?').run(position.id);
-    console.log(`[position] ${position.id} partial TP at ${pnlPercent.toFixed(1)}% (${strat.partial_tp_sell_percent}% sell)`);
+    const partialSellPercent = Math.min(100, Math.max(0, Number(strat.partial_tp_sell_percent || 0)));
+    const soldSizeSol = Number(position.size_sol) * (partialSellPercent / 100);
+    const remainingSizeSol = Math.max(0, Number(position.size_sol) - soldSizeSol);
+    const dryRunRealizedSol = soldSizeSol * pnlPercent / 100;
+    db.prepare(`
+      UPDATE dry_run_positions
+      SET partial_tp_done = 1,
+          partial_realized_sol = COALESCE(partial_realized_sol, 0) + ?,
+          size_sol = ?
+      WHERE id = ?
+    `).run(dryRunRealizedSol, remainingSizeSol || Number(position.size_sol), position.id);
+    db.prepare(`
+      INSERT INTO dry_run_trades (position_id, mint, side, at_ms, price, mcap, size_sol, token_amount_est, reason, payload_json)
+      VALUES (?, ?, 'sell', ?, ?, ?, ?, ?, 'PARTIAL_TP', ?)
+    `).run(position.id, position.mint, now(), price, mcap, soldSizeSol, null,
+      json({ pnlPercent, realizedSol: dryRunRealizedSol, partialSellPercent, remainingSizeSol, mode: position.execution_mode }));
+    position = {
+      ...position,
+      partial_tp_done: 1,
+      partial_realized_sol: partialRealizedSol + dryRunRealizedSol,
+      size_sol: remainingSizeSol || Number(position.size_sol),
+    };
+    console.log(`[position] ${position.id} partial TP at ${pnlPercent.toFixed(1)}% (${partialSellPercent}% sell)`);
     if (position.execution_mode === 'live' && position.token_amount_raw) {
       try {
         const sellAmount = Math.floor(Number(position.token_amount_raw) * (strat.partial_tp_sell_percent / 100));
@@ -147,12 +169,6 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
           const sell = await executeLiveSell({ ...position, token_amount_raw: String(sellAmount) }, 'PARTIAL_TP');
           const remaining = Number(position.token_amount_raw) - sellAmount;
           db.prepare('UPDATE dry_run_positions SET token_amount_raw = ? WHERE id = ?').run(String(remaining), position.id);
-          db.prepare(`
-            INSERT INTO dry_run_trades (position_id, mint, side, at_ms, price, mcap, size_sol, token_amount_est, reason, payload_json)
-            VALUES (?, ?, 'sell', ?, ?, ?, ?, ?, 'PARTIAL_TP', ?)
-          `).run(position.id, position.mint, now(), price, mcap,
-            position.size_sol * (strat.partial_tp_sell_percent / 100), sellAmount,
-            json({ pnlPercent, sell, partialSellPercent: strat.partial_tp_sell_percent, remaining }));
           console.log(`[position] ${position.id} partial TP sold ${sellAmount} tokens, ${remaining} remaining`);
         }
       } catch (err) {
@@ -168,9 +184,9 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
     else if (trailingHit) exitReason = 'TRAILING_TP';
   }
 
-  // Live exits will override these with realized SOL values
+  // Live exits will override these with realized SOL values for the remaining size.
   let finalPnlPercent = pnlPercent;
-  let finalPnlSol = pnlSol;
+  let finalPnlSol = pnlSol + Number(position.partial_realized_sol || 0);
 
   db.prepare(`
     UPDATE dry_run_positions
@@ -190,7 +206,7 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
     const receivedLamports = Number(sell.outputAmount || 0);
     const receivedSol = receivedLamports > 0 ? receivedLamports / 1_000_000_000 : null;
     if (receivedSol != null) {
-      finalPnlSol = receivedSol - Number(position.size_sol);
+      finalPnlSol = receivedSol - Number(position.size_sol) + Number(position.partial_realized_sol || 0);
       finalPnlPercent = (receivedSol / Number(position.size_sol) - 1) * 100;
     }
     db.prepare(`

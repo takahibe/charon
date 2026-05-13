@@ -228,6 +228,7 @@ export function initDb() {
   ensureColumn('dry_run_positions', 'token_amount_raw', 'TEXT');
   ensureColumn('dry_run_positions', 'strategy_id', "TEXT DEFAULT 'sniper'");
   ensureColumn('dry_run_positions', 'partial_tp_done', 'INTEGER DEFAULT 0');
+  ensureColumn('dry_run_positions', 'partial_realized_sol', 'REAL DEFAULT 0');
   ensureColumn('decision_logs', 'strategy_id', 'TEXT');
 
   const defaults = {
@@ -242,6 +243,16 @@ export function initDb() {
     default_sl_percent: '-25',
     default_trailing_enabled: 'true',
     default_trailing_percent: '20',
+    jupiter_slippage_bps: envSetting('JUPITER_SLIPPAGE_BPS', '200'),
+    jupiter_max_slippage_bps: envSetting('JUPITER_MAX_SLIPPAGE_BPS', '200'),
+    trench_v11_enabled: envSetting('TRENCH_V11_ENABLED', 'true'),
+    trench_max_bundler_rate: envSetting('TRENCH_MAX_BUNDLER_RATE', '0.3'),
+    trench_max_rug_ratio: envSetting('TRENCH_MAX_RUG_RATIO', '0.35'),
+    trench_max_single_holder_percent: envSetting('TRENCH_MAX_SINGLE_HOLDER_PERCENT', '25'),
+    trench_low_mcap_usd: envSetting('TRENCH_LOW_MCAP_USD', '50000'),
+    trench_min_fee_per_10k_volume_sol: envSetting('TRENCH_MIN_FEE_PER_10K_VOLUME_SOL', '0'),
+    trench_min_smart_buyers_5m: envSetting('TRENCH_MIN_SMART_BUYERS_5M', '0'),
+    trench_eu_sleep_hour_boost: envSetting('TRENCH_EU_SLEEP_HOUR_BOOST', 'true'),
     min_fee_claim_sol: envSetting('MIN_FEE_CLAIM_SOL', '2'),
     min_mcap_usd: '0',
     max_mcap_usd: '0',
@@ -355,8 +366,8 @@ export function initDb() {
     max_open_positions: 3,
     tp_percent: 100,
     sl_percent: -25,
-    trailing_enabled: false,
-    trailing_percent: 0,
+    trailing_enabled: true,
+    trailing_percent: 15,
     partial_tp: true,
     partial_tp_at_percent: 100,
     partial_tp_sell_percent: 50,
@@ -385,17 +396,49 @@ export function initDb() {
     trending_max_bundler_rate: 0.7,
     position_size_sol: 0.05,
     max_open_positions: 5,
-    tp_percent: 30,
-    sl_percent: -15,
+    tp_percent: 100,
+    sl_percent: -20,
     trailing_enabled: true,
-    trailing_percent: 10,
-    partial_tp: false,
-    partial_tp_at_percent: 0,
-    partial_tp_sell_percent: 0,
+    trailing_percent: 15,
+    partial_tp: true,
+    partial_tp_at_percent: 100,
+    partial_tp_sell_percent: 50,
     max_hold_ms: 0,
     use_llm: false,
     llm_min_confidence: 0,
   }), ts);
+
+  applyStrategyDefaults({
+    trench_v11_enabled: true,
+    trench_max_bundler_rate: 0.3,
+    trench_max_rug_ratio: 0.35,
+    trench_max_single_holder_percent: 25,
+    trench_low_mcap_usd: 50000,
+    trench_min_fee_per_10k_volume_sol: 0,
+    trench_min_smart_buyers_5m: 0,
+    trench_eu_sleep_hour_boost: true,
+  });
+}
+
+function applyStrategyDefaults(defaults) {
+  const rows = db.prepare('SELECT id, config_json FROM strategies').all();
+  const update = db.prepare('UPDATE strategies SET config_json = ? WHERE id = ?');
+  for (const row of rows) {
+    let config;
+    try {
+      config = JSON.parse(row.config_json);
+    } catch {
+      continue;
+    }
+    let changed = false;
+    for (const [key, value] of Object.entries(defaults)) {
+      if (config[key] === undefined) {
+        config[key] = value;
+        changed = true;
+      }
+    }
+    if (changed) update.run(JSON.stringify(config), row.id);
+  }
 }
 
 export function ensureColumn(table, column, ddl) {

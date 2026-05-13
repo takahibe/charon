@@ -9,6 +9,7 @@ import {
   SOLANA_PRIVATE_KEY,
   SOLANA_RPC_URL,
 } from './config.js';
+import { numSetting } from './db/settings.js';
 
 let liveWallet = null;
 let solanaConnection = null;
@@ -69,6 +70,10 @@ async function jupiterOrder({ inputMint, outputMint, amount }) {
   url.searchParams.set('outputMint', outputMint);
   url.searchParams.set('amount', String(amount));
   url.searchParams.set('taker', liveWallet.publicKey.toBase58());
+  const configuredSlippageBps = Math.floor(numSetting('jupiter_slippage_bps', JUPITER_SLIPPAGE_BPS));
+  const maxSlippageBps = Math.floor(numSetting('jupiter_max_slippage_bps', 200));
+  const slippageBps = Math.max(1, Math.min(configuredSlippageBps, maxSlippageBps));
+  url.searchParams.set('slippageBps', String(slippageBps));
   const res = await axios.get(url.toString(), {
     timeout: 20_000,
     headers: { ...JSON_HEADERS, 'x-api-key': JUPITER_API_KEY },

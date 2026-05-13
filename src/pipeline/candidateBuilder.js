@@ -6,6 +6,7 @@ import { fetchSavedWalletExposure } from '../enrichment/wallets.js';
 import { fetchTwitterNarrative } from '../enrichment/twitter.js';
 import { gmgnLink } from '../format.js';
 import { smartMoneyCluster } from '../signals/gmgnSmartMoney.js';
+import { assessTrenchRisk } from './trenchRisk.js';
 
 export function buildFeeSnapshot(fee, signature) {
   return {
@@ -122,7 +123,12 @@ export function filterCandidate(candidate) {
     }
   }
 
-  return { passed: failures.length === 0, failures, strategy: strat.id };
+  const trench = assessTrenchRisk(candidate, strat);
+  if (trench.enabled) {
+    failures.push(...trench.failures);
+  }
+
+  return { passed: failures.length === 0, failures, strategy: strat.id, trench };
 }
 
 export async function buildCandidate({ mint, fee = null, signature = null, graduatedCoin = null, trendingToken = null, route }) {
