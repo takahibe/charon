@@ -116,6 +116,7 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
   }
   const highWaterMcap = Math.max(Number(position.high_water_mcap || 0), Number(mcap));
   const highWaterPrice = Math.max(Number(position.high_water_price || 0), Number(price || 0));
+  const refreshedAtMs = now();
   let pnlPercent = (Number(mcap) / Number(position.entry_mcap) - 1) * 100;
   let pnlSol = Number(position.size_sol) * pnlPercent / 100;
   const partialRealizedSol = Number(position.partial_realized_sol || 0);
@@ -193,12 +194,21 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
   // Live exits will override these with realized SOL values for the remaining size.
   let finalPnlPercent = pnlPercent;
   let finalPnlSol = pnlSol + Number(position.partial_realized_sol || 0);
+  const floatingPnlPercent = finalPnlPercent;
+  const floatingPnlSol = finalPnlSol;
 
   db.prepare(`
     UPDATE dry_run_positions
-    SET high_water_mcap = ?, high_water_price = ?, trailing_armed = ?
+    SET high_water_mcap = ?,
+        high_water_price = ?,
+        trailing_armed = ?,
+        current_price = ?,
+        current_mcap = ?,
+        floating_pnl_percent = ?,
+        floating_pnl_sol = ?,
+        last_refreshed_at_ms = ?
     WHERE id = ?
-  `).run(highWaterMcap, highWaterPrice, trailingArmed ? 1 : 0, position.id);
+  `).run(highWaterMcap, highWaterPrice, trailingArmed ? 1 : 0, price, mcap, floatingPnlPercent, floatingPnlSol, refreshedAtMs, position.id);
 
   if (exitReason && autoExit && position.execution_mode === 'live') {
     if (sellInProgress.has(position.id)) return { ...position, exitReason: null };
@@ -245,6 +255,11 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
     asset,
     price,
     mcap,
+    current_price: price,
+    current_mcap: mcap,
+    floating_pnl_percent: floatingPnlPercent,
+    floating_pnl_sol: floatingPnlSol,
+    last_refreshed_at_ms: refreshedAtMs,
     highWaterMcap,
     high_water_mcap: highWaterMcap,
     high_water_price: highWaterPrice,

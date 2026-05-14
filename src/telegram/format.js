@@ -97,7 +97,14 @@ export function batchRevealSummary(batchId, rows, decision, triggerCandidateId =
 }
 
 export function positionPnlPercent(position) {
+  if (position.status === 'open' && position.floating_pnl_percent != null) return Number(position.floating_pnl_percent);
   if (position.pnl_percent != null) return Number(position.pnl_percent);
+  if (position.current_mcap && position.entry_mcap) {
+    return (Number(position.current_mcap) / Number(position.entry_mcap) - 1) * 100;
+  }
+  if (position.current_price && position.entry_price) {
+    return (Number(position.current_price) / Number(position.entry_price) - 1) * 100;
+  }
   if (position.entry_mcap && position.high_water_mcap) {
     return (Number(position.high_water_mcap) / Number(position.entry_mcap) - 1) * 100;
   }
@@ -108,6 +115,7 @@ export function positionPnlPercent(position) {
 }
 
 export function positionPnlSol(position) {
+  if (position.status === 'open' && position.floating_pnl_sol != null) return Number(position.floating_pnl_sol);
   if (position.pnl_sol != null) return Number(position.pnl_sol);
   return Number(position.size_sol || 0) * positionPnlPercent(position) / 100;
 }
@@ -139,8 +147,9 @@ export function formatPosition(position) {
     `Token: <a href="${gmgnLink(position.mint)}">${short(position.mint)}</a>`,
     `Status: <b>${escapeHtml(position.status)}</b> · Mode: <b>${escapeHtml(position.execution_mode || 'dry_run')}</b> · Strategy: <b>${escapeHtml(position.strategy_id || 'sniper')}</b>`,
     position.entry_signature ? `Entry TX: <a href="${txLink(position.entry_signature)}">${short(position.entry_signature)}</a>` : null,
-    `Entry mcap: ${fmtUsd(position.entry_mcap)} · High: ${fmtUsd(position.high_water_mcap)}`,
+    `Entry mcap: ${fmtUsd(position.entry_mcap)} · Current: ${fmtUsd(position.current_mcap || position.mcap)} · High: ${fmtUsd(position.high_water_mcap)}`,
     `Size: ${fmtSol(position.size_sol)} SOL · PnL: <b>${signedPct(pnl)}</b> / ${signedSol(pnlSol)}`,
+    position.last_refreshed_at_ms ? `Refreshed: ${new Date(Number(position.last_refreshed_at_ms)).toISOString()}` : null,
     `TP: ${fmtPct(position.tp_percent)} · SL: ${fmtPct(position.sl_percent)} · Trail: ${position.trailing_enabled ? `${fmtPct(position.trailing_percent)}` : 'off'}`,
     position.exit_reason ? `Exit: ${escapeHtml(position.exit_reason)} at ${fmtUsd(position.exit_mcap)} (${signedPct(position.pnl_percent)})` : null,
     position.exit_signature ? `Exit TX: <a href="${txLink(position.exit_signature)}">${short(position.exit_signature)}</a>` : null,
@@ -155,7 +164,7 @@ export function compactOpenPositionLine(position, index = null) {
   return [
     `${prefix} ${pnlEmoji(pnl)} <b>${escapeHtml(label)}</b> #${position.id}`,
     `   PnL: <b>${signedPct(pnl)}</b> / ${signedSol(pnlSol)} · Size: ${fmtSol(position.size_sol)} SOL`,
-    `   Entry: ${fmtUsd(position.entry_mcap)} · High: ${fmtUsd(position.high_water_mcap)} · <a href="${gmgnLink(position.mint)}">GMGN</a>`,
+    `   Entry: ${fmtUsd(position.entry_mcap)} · Current: ${fmtUsd(position.current_mcap || position.mcap)} · High: ${fmtUsd(position.high_water_mcap)} · <a href="${gmgnLink(position.mint)}">GMGN</a>`,
   ].join('\n');
 }
 
