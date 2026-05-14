@@ -19,6 +19,7 @@ import { short } from '../format.js';
 import { escapeHtml } from '../format.js';
 
 export const seenSignalCandidates = new Map();
+const watchFollowups = new Map();
 
 setDegenHandler(maybeProcessDegenCandidate);
 setCandidateHandler(processCandidateFromSignals);
@@ -130,7 +131,38 @@ export async function processCandidateFromSignals(signals) {
         maxOpenPositions: numSetting('max_open_positions', 3),
       },
     });
+    scheduleWatchFollowup(signals, candidate, currentDecision);
   }
+}
+
+function scheduleWatchFollowup(signals, candidate, decision) {
+  if (!boolSetting('watch_followup_enabled', true)) return;
+  if (signals?.watchFollowupAttempt) return;
+  if (decision?.verdict !== 'WATCH') return;
+  const minConfidence = numSetting('watch_followup_min_confidence', 60);
+  if (Number(decision.confidence || 0) < minConfidence) return;
+
+  const delayMs = Math.max(60_000, numSetting('watch_followup_delay_ms', 7 * 60_000));
+  const mint = candidate?.token?.mint || signals?.mint;
+  const route = candidate?.signals?.route || signals?.route || signalLabel(signals);
+  if (!mint) return;
+  const key = `${route}:${mint}`;
+  const last = watchFollowups.get(key) || 0;
+  const nowMs = now();
+  if (nowMs - last < delayMs * 2) return;
+  watchFollowups.set(key, nowMs);
+
+  console.log(`[watch] scheduled follow-up for ${short(mint)} in ${Math.round(delayMs / 1000)}s (confidence=${decision.confidence})`);
+  setTimeout(() => {
+    const followupSignals = {
+      ...signals,
+      watchFollowupAttempt: true,
+      signature: null,
+      reason: `watch_followup:${decision.confidence}`,
+    };
+    processCandidateFromSignals(followupSignals)
+      .catch(err => console.log(`[watch] follow-up failed for ${short(mint)}: ${err.message}`));
+  }, delayMs).unref?.();
 }
 
 export async function handleApprovedBuy(selectedRow, decision, batchId, rows = [], triggerCandidateId = null) {
