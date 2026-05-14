@@ -131,7 +131,7 @@ export function filterCandidate(candidate) {
   return { passed: failures.length === 0, failures, strategy: strat.id, trench };
 }
 
-export async function buildCandidate({ mint, fee = null, signature = null, graduatedCoin = null, trendingToken = null, route }) {
+export async function buildCandidate({ mint, fee = null, signature = null, graduatedCoin = null, trendingToken = null, route, sourceCount = null, sources = [] }) {
   const strat = activeStrategy();
   const gmgn = await fetchGmgnTokenInfo(mint);
   const jupiterAsset = await fetchJupiterAsset(mint);
@@ -192,6 +192,8 @@ export async function buildCandidate({ mint, fee = null, signature = null, gradu
       hasFeeClaim: Boolean(fee),
       hasGraduated: Boolean(graduatedCoin),
       hasTrending: Boolean(trendingToken),
+      sourceCount: Number.isFinite(Number(sourceCount)) ? Number(sourceCount) : null,
+      sources: Array.isArray(sources) ? sources : [],
       triggerSignature: signature,
       strategy: strat.id,
     },

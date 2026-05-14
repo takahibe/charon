@@ -78,12 +78,16 @@ export function assessTrenchRisk(candidate, strat = {}, settings = {}) {
   const smartNetUsd = num(candidate?.metrics?.smartMoneyNetUsd5m, 0);
   const buyPressure = candidate?.metrics?.smartMoneyBuyPressure5m;
   const route = candidate?.signals?.route || 'unknown';
-  const sourceCount = [
+  const inferredSourceCount = [
     candidate?.signals?.hasFeeClaim,
     candidate?.signals?.hasGraduated,
     candidate?.signals?.hasTrending,
     route === 'meteora_dbc',
   ].filter(Boolean).length;
+  const explicitSourceCount = num(candidate?.signals?.sourceCount, NaN);
+  const sourceCount = Number.isFinite(explicitSourceCount) && explicitSourceCount > 0
+    ? explicitSourceCount
+    : inferredSourceCount;
 
   const blockedRoutes = new Set(list(strat.trench_blocked_routes ?? settings.trench_blocked_routes, []));
   if (blockedRoutes.has(route)) {

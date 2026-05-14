@@ -258,8 +258,8 @@ export function initDb() {
     trench_min_fee_per_10k_volume_sol: envSetting('TRENCH_MIN_FEE_PER_10K_VOLUME_SOL', '0'),
     trench_min_smart_buyers_5m: envSetting('TRENCH_MIN_SMART_BUYERS_5M', '0'),
     trench_eu_sleep_hour_boost: envSetting('TRENCH_EU_SLEEP_HOUR_BOOST', 'true'),
-    trench_blocked_routes: envSetting('TRENCH_BLOCKED_ROUTES', 'fee_trending,fee_graduated_trending'),
-    trench_preferred_routes: envSetting('TRENCH_PREFERRED_ROUTES', 'dual_source,trending,graduated_trending'),
+    trench_blocked_routes: envSetting('TRENCH_BLOCKED_ROUTES', 'fee_trending,fee_graduated_trending,graduated_trending'),
+    trench_preferred_routes: envSetting('TRENCH_PREFERRED_ROUTES', 'dual_source,trending'),
     trench_emergency_sl_percent: envSetting('TRENCH_EMERGENCY_SL_PERCENT', '-30'),
     stale_position_max_hold_ms: envSetting('STALE_POSITION_MAX_HOLD_MS', String(6 * 60 * 60 * 1000)),
     min_fee_claim_sol: envSetting('MIN_FEE_CLAIM_SOL', '2'),
@@ -426,8 +426,8 @@ export function initDb() {
     trench_min_fee_per_10k_volume_sol: 0,
     trench_min_smart_buyers_5m: 0,
     trench_eu_sleep_hour_boost: true,
-    trench_blocked_routes: ['fee_trending', 'fee_graduated_trending'],
-    trench_preferred_routes: ['dual_source', 'trending', 'graduated_trending'],
+    trench_blocked_routes: ['fee_trending', 'fee_graduated_trending', 'graduated_trending'],
+    trench_preferred_routes: ['dual_source', 'trending'],
     trench_emergency_sl_percent: -30,
   });
 
@@ -443,15 +443,16 @@ export function initDb() {
     max_hold_ms: 2 * 60 * 60 * 1000,
     use_llm: true,
     llm_min_confidence: 75,
-    trench_blocked_routes: ['fee_trending', 'fee_graduated_trending'],
-    trench_preferred_routes: ['dual_source', 'trending', 'graduated_trending'],
+    trench_blocked_routes: ['fee_trending', 'fee_graduated_trending', 'graduated_trending'],
+    trench_preferred_routes: ['dual_source', 'trending'],
     trench_emergency_sl_percent: -30,
   });
   applyStrategyOverrides('sniper', {
     max_hold_ms: 6 * 60 * 60 * 1000,
     use_llm: true,
     llm_min_confidence: 75,
-    trench_blocked_routes: ['fee_trending', 'fee_graduated_trending'],
+    trench_blocked_routes: ['fee_trending', 'fee_graduated_trending', 'graduated_trending'],
+    trench_preferred_routes: ['dual_source', 'trending'],
     trench_emergency_sl_percent: -30,
   });
 }

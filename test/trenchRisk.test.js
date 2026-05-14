@@ -70,3 +70,27 @@ test('trench risk blocks bad routes and enforces multi-source entries', () => {
   assert.match(result.failures.join('\n'), /route blocked/);
   assert.match(result.failures.join('\n'), /source count/);
 });
+
+test('trench risk honors explicit server sourceCount for dual_source route', () => {
+  const result = assessTrenchRisk(candidate({
+    signals: {
+      route: 'dual_source',
+      hasFeeClaim: false,
+      hasGraduated: false,
+      hasTrending: false,
+      sourceCount: 2,
+    },
+  }), {
+    trench_v11_enabled: true,
+    min_source_count: 2,
+  });
+  assert.doesNotMatch(result.failures.join('\n'), /source count/);
+});
+
+test('trench risk blocks graduated_trending when lessons mark it deprecated', () => {
+  const result = assessTrenchRisk(candidate(), {
+    trench_v11_enabled: true,
+    trench_blocked_routes: ['graduated_trending'],
+  });
+  assert.match(result.failures.join('\n'), /trench route blocked: graduated_trending/);
+});

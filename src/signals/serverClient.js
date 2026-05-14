@@ -25,9 +25,9 @@ function signalKey(signal) {
   return `${signal.mint}:${sources}`;
 }
 
-async function triggerCandidate({ mint, fee, signature, graduatedCoin, trendingToken, route }) {
+async function triggerCandidate({ mint, fee, signature, graduatedCoin, trendingToken, route, sourceCount, sources }) {
   if (!candidateHandler) return;
-  await candidateHandler({ mint, fee, signature, graduatedCoin, trendingToken, route });
+  await candidateHandler({ mint, fee, signature, graduatedCoin, trendingToken, route, sourceCount, sources });
 }
 
 export async function fetchServerSignals() {
@@ -101,7 +101,8 @@ export async function fetchServerSignals() {
       const graduatedCoin = graduated.get(mint) || signal.graduated || null;
       const trendingToken = trending.get(mint) || null;
       const hasFee = Boolean(signal.feeClaim);
-      const sourceCount = signal.sourceCount || 1;
+      const sourceCount = signal.sourceCount || signal.sources?.length || 1;
+      const sources = Array.isArray(signal.sources) ? signal.sources : [];
 
       // Strategy gate: check source count
       if (sourceCount < strat.min_source_count) { processed++; continue; }
@@ -146,7 +147,7 @@ export async function fetchServerSignals() {
         const athDist = signal.graduated?.distanceFromAthPercent;
         if (athDist != null && athDist <= strat.max_ath_distance_pct) {
           // Already at dip target, trigger immediately
-          await triggerCandidate({ mint, fee, signature, graduatedCoin, trendingToken, route });
+          await triggerCandidate({ mint, fee, signature, graduatedCoin, trendingToken, route, sourceCount, sources });
           triggered++;
         } else {
           // Store price alert for later
@@ -165,7 +166,7 @@ export async function fetchServerSignals() {
         }
       } else {
         // Immediate entry mode (sniper, smart_money, degen)
-        await triggerCandidate({ mint, fee, signature, graduatedCoin, trendingToken, route });
+        await triggerCandidate({ mint, fee, signature, graduatedCoin, trendingToken, route, sourceCount, sources });
         triggered++;
       }
 

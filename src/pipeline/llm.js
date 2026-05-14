@@ -134,17 +134,21 @@ export async function decideCandidateBatch(rows, triggerCandidateId) {
       selected_row: decision.verdict === 'BUY' && row ? row : null,
     };
   } catch (err) {
+    const isTimeout = err.code === 'ECONNABORTED' || /timeout/i.test(err.message || '');
+    const reason = isTimeout
+      ? `LLM timeout after ${LLM_TIMEOUT_MS}ms; batch skipped instead of downgraded to WATCH.`
+      : `LLM failed: ${err.message}`;
     console.log(`[llm] batch failed: ${err.message}`);
     return {
-      verdict: 'WATCH',
+      verdict: isTimeout ? 'PASS' : 'WATCH',
       confidence: 0,
       selected_candidate_id: null,
       selected_mint: null,
-      reason: `LLM failed: ${err.message}`,
-      risks: ['llm_error'],
+      reason,
+      risks: [isTimeout ? 'llm_timeout' : 'llm_error'],
       suggested_tp_percent: numSetting('default_tp_percent', 50),
       suggested_sl_percent: numSetting('default_sl_percent', -25),
-      raw: { error: err.message },
+      raw: { error: err.message, code: err.code, timeout: isTimeout },
     };
   }
 }
