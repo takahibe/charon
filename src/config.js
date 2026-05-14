@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 
-dotenv.config();
+dotenv.config({ override: true });
 
 function envValue(key, fallback = '') {
   const raw = process.env[key];
