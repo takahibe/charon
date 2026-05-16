@@ -128,6 +128,7 @@ export function agentText() {
     `Size: ${fmtSol(strat.position_size_sol)} SOL`,
     `TP/SL: ${fmtPct(strat.tp_percent)} / ${fmtPct(strat.sl_percent)}`,
     `Trailing: ${strat.trailing_enabled ? fmtPct(strat.trailing_percent) : 'off'}`,
+    `Profit lock: ${strat.profit_lock_enabled ? `on · cost ${strat.execution_cost_bps_assumption ?? 0}bps · min net ${strat.min_net_profit_lock_bps ?? 0}bps` : 'off'}`,
   ].join('\n');
 }
 
@@ -204,6 +205,7 @@ export function strategyMenuText() {
     `Size: ${fmtSol(strat.position_size_sol)} SOL`,
     `TP/SL: ${fmtPct(strat.tp_percent)} / ${fmtPct(strat.sl_percent)}`,
     `Trailing: ${strat.trailing_enabled ? fmtPct(strat.trailing_percent) : 'off'}`,
+    `Profit lock: ${strat.profit_lock_enabled ? `on · cost ${strat.execution_cost_bps_assumption ?? 0}bps · min net ${strat.min_net_profit_lock_bps ?? 0}bps` : 'off'}`,
     `Max positions: ${strat.max_open_positions}`,
     strat.min_holders > 0 ? `Min holders: ${strat.min_holders}` : null,
     strat.max_ath_distance_pct < 0 ? `Max ATH distance: ${strat.max_ath_distance_pct}%` : null,

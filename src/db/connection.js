@@ -432,6 +432,16 @@ export function initDb() {
     trench_blocked_routes: ['fee_trending', 'fee_graduated_trending', 'graduated_trending'],
     trench_preferred_routes: ['dual_source', 'trending'],
     trench_emergency_sl_percent: -30,
+    profit_lock_enabled: true,
+    execution_cost_bps_assumption: 450,
+    min_net_profit_lock_bps: 1000,
+    profit_lock_ladder: [
+      { trigger_gross_bps: 2000, floor_gross_bps: 500 },
+      { trigger_gross_bps: 3000, floor_gross_bps: 1500 },
+      { trigger_gross_bps: 5000, floor_gross_bps: 2500 },
+      { trigger_gross_bps: 7500, floor_gross_bps: 4000 },
+      { trigger_gross_bps: 10000, floor_gross_bps: 6000 },
+    ],
   });
 
   applyStrategyOverrides('degen', {

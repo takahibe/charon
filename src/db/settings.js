@@ -86,6 +86,16 @@ function defaultStrategy() {
     position_size_sol: 0.1, max_open_positions: 3,
     tp_percent: 50, sl_percent: -25, trailing_enabled: true, trailing_percent: 20,
     partial_tp: false, partial_tp_at_percent: 0, partial_tp_sell_percent: 0,
+    profit_lock_enabled: true,
+    execution_cost_bps_assumption: 450,
+    min_net_profit_lock_bps: 1000,
+    profit_lock_ladder: [
+      { trigger_gross_bps: 2000, floor_gross_bps: 500 },
+      { trigger_gross_bps: 3000, floor_gross_bps: 1500 },
+      { trigger_gross_bps: 5000, floor_gross_bps: 2500 },
+      { trigger_gross_bps: 7500, floor_gross_bps: 4000 },
+      { trigger_gross_bps: 10000, floor_gross_bps: 6000 },
+    ],
     max_hold_ms: 0, use_llm: true, llm_min_confidence: 50,
   };
 }

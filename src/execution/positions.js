@@ -11,6 +11,7 @@ import { openPositions } from '../db/positions.js';
 import { updateCandidateSnapshot } from '../db/candidates.js';
 import { trending } from '../signals/trending.js';
 import { executeLiveSell } from './router.js';
+import { evaluateProfitLock, normalizeProfitLockConfig } from './profitLock.js';
 import { sendPositionExit } from '../telegram/send.js';
 
 export async function freshEntryMarket(mint, candidate) {
@@ -132,6 +133,12 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
   const trailingArmed = position.trailing_armed || (position.trailing_enabled && tpHit);
   const trailDrop = highWaterMcap > 0 ? (Number(mcap) / highWaterMcap - 1) * 100 : 0;
   const trailingHit = trailingArmed && position.trailing_enabled && trailDrop <= -Math.abs(Number(position.trailing_percent));
+  const highWaterGrossBps = Number(position.entry_mcap) > 0 ? (highWaterMcap / Number(position.entry_mcap) - 1) * 10_000 : null;
+  const currentGrossBps = pnlPercent * 100;
+  const profitLock = evaluateProfitLock(
+    { highWaterGrossBps, currentGrossBps },
+    normalizeProfitLockConfig(strat || {}),
+  );
   let exitReason = null;
   let closed = false;
 
@@ -185,7 +192,8 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
 
   // Standard exit checks
   if (!exitReason) {
-    if (emergencySlHit) exitReason = 'EMERGENCY_SL';
+    if (profitLock.exit) exitReason = 'PROFIT_LOCK';
+    else if (emergencySlHit) exitReason = 'EMERGENCY_SL';
     else if (slHit) exitReason = 'SL';
     else if (tpHit && !position.trailing_enabled) exitReason = 'TP';
     else if (trailingHit) exitReason = 'TRAILING_TP';
@@ -234,7 +242,7 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
     db.prepare(`
       INSERT INTO dry_run_trades (position_id, mint, side, at_ms, price, mcap, size_sol, token_amount_est, reason, payload_json)
       VALUES (?, ?, 'sell', ?, ?, ?, ?, ?, ?, ?)
-    `).run(position.id, position.mint, now(), price, mcap, position.size_sol, position.token_amount_est, exitReason, json({ pnlPercent: finalPnlPercent, pnlSol: finalPnlSol, receivedSol: receivedSol ?? null, sell }));
+    `).run(position.id, position.mint, now(), price, mcap, position.size_sol, position.token_amount_est, exitReason, json({ pnlPercent: finalPnlPercent, pnlSol: finalPnlSol, receivedSol: receivedSol ?? null, sell, profitLock }));
     closed = true;
   } else if (exitReason && autoExit) {
     db.prepare(`
@@ -245,7 +253,7 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
     db.prepare(`
       INSERT INTO dry_run_trades (position_id, mint, side, at_ms, price, mcap, size_sol, token_amount_est, reason, payload_json)
       VALUES (?, ?, 'sell', ?, ?, ?, ?, ?, ?, ?)
-    `).run(position.id, position.mint, now(), price, mcap, position.size_sol, position.token_amount_est, exitReason, json({ pnlPercent: finalPnlPercent, pnlSol: finalPnlSol }));
+    `).run(position.id, position.mint, now(), price, mcap, position.size_sol, position.token_amount_est, exitReason, json({ pnlPercent: finalPnlPercent, pnlSol: finalPnlSol, profitLock }));
     closed = true;
   }
   return {
