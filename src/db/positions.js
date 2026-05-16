@@ -42,6 +42,17 @@ export function createDryRunPosition(candidateId, candidate, decision, reason = 
     `).get(candidate.token.mint);
     if (existing) return existing.id;
 
+    // Atomic max-position guard: prevents race condition where concurrent
+    // signals both pass the early canOpenMorePositions() check.
+    const max = strat.max_open_positions ?? numSetting('max_open_positions', 3);
+    if (max > 0) {
+      const currentOpen = db.prepare(`SELECT COUNT(*) AS count FROM dry_run_positions WHERE status = 'open'`).get().count;
+      if (currentOpen >= max) {
+        console.log(`[positions] max positions reached (${currentOpen}/${max}), rejecting ${candidate.token.symbol}`);
+        return null;
+      }
+    }
+
     const result = db.prepare(`
       INSERT INTO dry_run_positions (
         candidate_id, mint, symbol, status, opened_at_ms, size_sol, entry_price, entry_mcap,
