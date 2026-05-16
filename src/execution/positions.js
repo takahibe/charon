@@ -193,8 +193,8 @@ export async function refreshPosition(position, { autoExit = true, jupiterPnl = 
   // Standard exit checks
   if (!exitReason) {
     if (profitLock.exit) exitReason = 'PROFIT_LOCK';
-    else if (emergencySlHit) exitReason = 'EMERGENCY_SL';
     else if (slHit) exitReason = 'SL';
+    else if (emergencySlHit) exitReason = 'EMERGENCY_SL';
     else if (tpHit && !position.trailing_enabled) exitReason = 'TP';
     else if (trailingHit) exitReason = 'TRAILING_TP';
   }
